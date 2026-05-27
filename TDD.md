@@ -3,6 +3,7 @@ Table of Content
 
 * API
 * Internal Representation
+* Agent Structure
 
 # API
 
@@ -104,6 +105,7 @@ Version: Int
 Content: String
 Metadata:
   Prompt: String
+  Etc
 
 Layout happens at the page level. We reference the Format table
 
@@ -114,9 +116,63 @@ Width: Float
 Height: Float
 
 Layout:
-BookId: UUID
 FormatId: UUID
+PageId: UUID
 Version: Int
-ElementLaoyouts:
+ElementLayouts:
   ElementId: UUID
   BoundingBox: (Point, Point)
+  Etc
+
+Book:
+Metadata:
+  Theme
+  Target
+  Etc
+
+Page:
+BookId: UUID
+Metadata:
+  Description
+  Prompt
+
+# Agent Structure
+
+We have a tree of agents.
+
+At the top level is the Orchestrator. It takes user input, calls subagents, and returns a response.
+
+Below the Orchestrator are the Research, Content, Layout subagents.
+
+       +------------------+
+       |   Orchestrator   |
+       +------------------+
+         |       |       |
++----------+-----------+----------+
+| Research |  Content  |  Layout  |
++----------+-----------+----------+
+
+The Research agent is our global planner. It makes project-wide decisions, searches the web, and is responsible for major theme and formatting decisions.
+
+Required tools: Web Search, Book table CRUD operations, get-outline, get-content, preview
+Required model capabilities: Reasoning
+
+The Content agent is responsible for all content elements. The actual images and text. This agent also assigns these elements to specific pages.
+
+Required tools: media-lookup, media-creation, get-page-elements, get-element, CRUD element operation
+Media queries require image capable models - these can be a separate subagent.
+
+The Layout agent takes the content and lays it out on the page.
+
+Content and Layout agents work at the page level. So they can be run in parallel if multiple page edits are required by the orchestrator.
+
+Content and Layout agents have a built in validation loop.
+Content agent validates against the global requirements recorded by the Research agent.
+Does this make sense, is it truthful, does it fit with the theme, is it in the correct order, etc
+Layout validates with deterministic layout rules. Is the centering correct, does the text overflow, is it too small or too big, are the images of the correct resolution, etc.
+
+After every prompt, the orchestrator agent creates a new version of all layouts and content.
+
+# UI
+
+TBD
