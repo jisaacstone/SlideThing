@@ -176,3 +176,7 @@ After every prompt, the orchestrator agent creates a new version of all layouts 
 # UI
 
 The UI will be built on top of paged.js. A custom JS library will be built to allow the editing and movement of items on the page. We will also use paged.js to export to pdf, via headless browser. This allows high-fidelity between the UI and the final output.
+
+The internal representation will be built on page load. A websocket will communicate changes between the clinet and server. Only diffs will be sent.
+
+The user should be able to move things, edit text, and enter new prompts from the UI
