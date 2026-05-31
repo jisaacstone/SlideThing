@@ -1,3 +1,5 @@
 .env
 .aider*
 *.sw?
+_build
+deps

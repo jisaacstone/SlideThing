@@ -1,0 +1,40 @@
+defmodule Slidething.Application do
+  # See https://hexdocs.pm/elixir/Application.html
+  # for more information on OTP Applications
+  @moduledoc false
+
+  use Application
+
+  @impl true
+  def start(_type, _args) do
+    children = [
+      SlidethingWeb.Telemetry,
+      Slidething.Repo,
+      {DNSCluster, query: Application.get_env(:slidething, :dns_cluster_query) || :ignore},
+      {Phoenix.PubSub, name: Slidething.PubSub},
+      # Registry for tracking agent processes by {run_id, agent_type, scope}
+      {Registry, keys: :unique, name: Slidething.AgentRegistry},
+      # Registry for tracking run coordinators by run_id
+      {Registry, keys: :unique, name: Slidething.RunRegistry},
+      # DynamicSupervisor for per-run supervision trees
+      {DynamicSupervisor, name: Slidething.RunSupervisor, strategy: :one_for_one},
+      # Task.Supervisor for IO-bound work (LLM calls, image generation, HTTP)
+      {Task.Supervisor, name: Slidething.IOTaskSupervisor},
+      # Start to serve requests, typically the last entry
+      SlidethingWeb.Endpoint
+    ]
+
+    # See https://hexdocs.pm/elixir/Supervisor.html
+    # for other strategies and supported options
+    opts = [strategy: :one_for_one, name: Slidething.Supervisor]
+    Supervisor.start_link(children, opts)
+  end
+
+  # Tell Phoenix to update the endpoint configuration
+  # whenever the application is updated.
+  @impl true
+  def config_change(changed, _new, removed) do
+    SlidethingWeb.Endpoint.config_change(changed, removed)
+    :ok
+  end
+end
