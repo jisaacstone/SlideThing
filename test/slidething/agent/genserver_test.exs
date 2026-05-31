@@ -1,7 +1,7 @@
 defmodule Slidething.Agent.GenServerTest do
   use ExUnit.Case, async: false
 
-  alias Slidething.Agent.{AgentSpec, Message, ToolCall}
+  alias Slidething.Agent.AgentSpec
   alias Slidething.Agent.GenServer, as: AgentGenServer
 
   setup do
@@ -18,9 +18,10 @@ defmodule Slidething.Agent.GenServerTest do
       tools: [:mock_create_element]
     }
 
+    test_pid = self()
     {:ok, coordinator_pid} = Task.start(fn -> 
       receive do
-        msg -> send(self(), {:received, msg})
+        msg -> send(test_pid, {:received, msg})
       after
         5000 -> :ok
       end
@@ -155,13 +156,39 @@ defmodule Slidething.Agent.GenServerTest do
   end
 
   describe "error handling" do
-    test "handles task crashes gracefully", %{agent_pid: agent_pid, run_id: run_id} do
+    test "handles task crashes gracefully", %{run_id: run_id} do
+      spec = %AgentSpec{
+        name: :content,
+        provider: "mock",
+        model: "mock-model",
+        temperature: 0.7,
+        max_tokens: 4000,
+        max_iterations: 1,
+        system_prompt: "Test",
+        tools: [:mock_create_element]
+      }
+
+      test_pid = self()
+      {:ok, coordinator} = Task.start(fn ->
+        receive do
+          msg -> send(test_pid, {:coordinator_received, msg})
+        after
+          5000 -> :ok
+        end
+      end)
+
+      {:ok, agent_pid} = AgentGenServer.start_link(
+        run_id: run_id,
+        agent_type: :content,
+        scope: {:page, "page-fail"},
+        coordinator_pid: coordinator,
+        agent_spec: spec
+      )
+
       Phoenix.PubSub.subscribe(Slidething.PubSub, "agent_events:#{run_id}")
-      
-      # Manually trigger a task that will crash
-      send(agent_pid, :do_llm_call)
-      
-      # Should handle the crash
+
+      AgentGenServer.start_task(agent_pid, "Test", %{})
+
       assert_receive {:agent_event, %{event: :failed}}, 2000
     end
   end

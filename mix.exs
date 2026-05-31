@@ -40,6 +40,9 @@ defmodule Slidething.MixProject do
   defp deps do
     [
       {:phoenix, "~> 1.8.7"},
+      {:ecto_sql, "~> 3.14"},
+      {:ecto_sqlite3, "~> 0.24"},
+      {:phoenix_ecto, "~> 4.7"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},
@@ -55,10 +58,9 @@ defmodule Slidething.MixProject do
   # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
-      setup: ["deps.get", "ecto.setup"],
-      "ecto.setup": ["ecto.create", "ecto.migrate"],
-      "ecto.reset": ["ecto.drop", "ecto.setup"],
-      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
+      setup: ["deps.get", "ecto.create"],
+      "ecto.reset": ["ecto.drop", "ecto.create"],
+      test: ["ecto.create --quiet", "test"],
       precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
     ]
   end

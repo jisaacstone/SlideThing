@@ -3,8 +3,8 @@
 *.sw?
 /_build
 /deps
+/priv
 /.elixir_ls
-/priv/repo/*.db
-/priv/repo/*.db-*
+
 erl_crash.dump
 *.ez

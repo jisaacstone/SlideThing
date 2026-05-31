@@ -116,6 +116,12 @@ defmodule Slidething.Agent.RunCoordinator do
   end
 
   @impl true
+  def handle_info({:agent_done, agent_pid, _result}, %{status: :failed} = state) do
+    Logger.warning("[RunCoordinator] Ignoring agent_done from #{inspect(agent_pid)} - coordinator already failed")
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info({:agent_done, agent_pid, result}, state) do
     Logger.info("[RunCoordinator] Agent completed: #{inspect(agent_pid)}")
 
