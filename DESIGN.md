@@ -351,3 +351,147 @@ Deterministic-only operations (called by RunCoordinator, not by agents):
 ```
 
 Coordinator NEVER blocks. All transitions are message-driven.
+
+### Communication Pattern (handle_cast vs handle_info)
+
+**Coordinator → Agent:** Use `GenServer.cast` (async, no reply expected)
+```elixir
+GenServer.cast(agent_pid, {:start_task, task_desc, context})
+```
+
+**Task result → Agent:** Use `handle_info` (Task callbacks are regular messages)
+```elixir
+def handle_info({ref, result}, %{pending_task: %{ref: ref}} = state) do
+  # process LLM result
+end
+```
+
+**Agent → Coordinator:** Use `send` (plain message, Coordinator receives via `handle_info`)
+```elixir
+send(state.coordinator_pid, {:agent_done, self(), result})
+```
+
+### Agent Scope Flexibility
+
+Agents are NOT restricted to per-page scope. The Planner decides scope based on task:
+
+```elixir
+scope: :book                          # whole book (outline, theme)
+     | {:page, page_id}               # single page
+     | {:pages, [page_id]}            # multiple pages
+     | {:element, element_id}         # single element
+     | {:elements, [element_id]}      # multiple elements
+```
+
+ContentAgent can work on book-level ("create outline"), page-level ("add content to page 3"), 
+or element-level ("rewrite this paragraph"). The agent GenServer doesn't care about scope — 
+it just works with whatever context it's given.
+
+### Monitoring and Observability
+
+**Phoenix LiveDashboard** custom page for real-time agent monitoring:
+- Running agents: type, scope, status, iteration count
+- Conversation history: messages sent to LLM, responses
+- Tool calls: which tools were requested, results
+- Timing: how long each LLM call took
+- Errors: failed tasks, retry attempts
+
+Each agent GenServer broadcasts events via PubSub:
+```elixir
+Phoenix.PubSub.broadcast(Slidething.PubSub, "agent_events:#{run_id}", 
+  {:agent_event, self(), {:started, state.agent_type, state.scope}})
+```
+
+**Agent state inspection** for debugging:
+```elixir
+def handle_call(:get_state, _from, state) do
+  {:reply, state, state}
+end
+```
+
+### Streaming vs Non-Streaming LLM Calls
+
+**MVP:** Start with non-streaming (simpler, easier to parse JSON).
+
+**Future:** Add streaming for better UX:
+```elixir
+Task.Supervisor.async_nolink(:io_task_supervisor, fn ->
+  LLM.Client.stream_json(agent_spec, messages, fn chunk ->
+    send(agent_pid, {:llm_chunk, chunk})
+  end)
+end)
+```
+
+Monitoring dashboard shows progress (iteration count, tool calls) even without streaming.
+
+### Communication Pattern (handle_cast vs handle_info)
+
+**Coordinator → Agent:** Use `GenServer.cast` (async, no reply expected)
+```elixir
+GenServer.cast(agent_pid, {:start_task, task_desc, context})
+```
+
+**Task result → Agent:** Use `handle_info` (Task callbacks are regular messages)
+```elixir
+def handle_info({ref, result}, %{pending_task: %{ref: ref}} = state) do
+  # process LLM result
+end
+```
+
+**Agent → Coordinator:** Use `send` (plain message, Coordinator receives via `handle_info`)
+```elixir
+send(state.coordinator_pid, {:agent_done, self(), result})
+```
+
+### Agent Scope Flexibility
+
+Agents are NOT restricted to per-page scope. The Planner decides scope based on task:
+
+```elixir
+scope: :book                          # whole book (outline, theme)
+     | {:page, page_id}               # single page
+     | {:pages, [page_id]}            # multiple pages
+     | {:element, element_id}         # single element
+     | {:elements, [element_id]}      # multiple elements
+```
+
+ContentAgent can work on book-level ("create outline"), page-level ("add content to page 3"), 
+or element-level ("rewrite this paragraph"). The agent GenServer doesn't care about scope — 
+it just works with whatever context it's given.
+
+### Monitoring and Observability
+
+**Phoenix LiveDashboard** custom page for real-time agent monitoring:
+- Running agents: type, scope, status, iteration count
+- Conversation history: messages sent to LLM, responses
+- Tool calls: which tools were requested, results
+- Timing: how long each LLM call took
+- Errors: failed tasks, retry attempts
+
+Each agent GenServer broadcasts events via PubSub:
+```elixir
+Phoenix.PubSub.broadcast(Slidething.PubSub, "agent_events:#{run_id}", 
+  {:agent_event, self(), {:started, state.agent_type, state.scope}})
+```
+
+**Agent state inspection** for debugging:
+```elixir
+def handle_call(:get_state, _from, state) do
+  {:reply, state, state}
+end
+```
+
+### Streaming vs Non-Streaming LLM Calls
+
+**MVP:** Start with non-streaming (simpler, easier to parse JSON).
+
+**Future:** Add streaming for better UX:
+```elixir
+Task.Supervisor.async_nolink(:io_task_supervisor, fn ->
+  LLM.Client.stream_json(agent_spec, messages, fn chunk ->
+    send(agent_pid, {:llm_chunk, chunk})
+  end)
+end)
+```
+
+Monitoring dashboard shows progress (iteration count, tool calls) even without streaming.

@@ -19,8 +19,7 @@ config :slidething, SlidethingWeb.Endpoint,
     formats: [json: SlidethingWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: Slidething.PubSub,
-  live_view: [signing_salt: "yippwPe1"]
+  pubsub_server: Slidething.PubSub
 
 # Configure Elixir's Logger
 config :logger, :default_formatter,

@@ -14,7 +14,7 @@ defmodule Slidething.Agent.RunCoordinator do
   use GenServer
   require Logger
 
-  alias Slidething.Agent.{AgentSpec, RunPlan, SubagentTask, Patch}
+  alias Slidething.Agent.{AgentSpec, RunPlan, SubagentTask}
   alias Slidething.Agent.GenServer, as: AgentGenServer
 
   defstruct [

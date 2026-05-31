@@ -10,7 +10,6 @@ defmodule Slidething.Application do
     children = [
       SlidethingWeb.Telemetry,
       Slidething.Repo,
-      {DNSCluster, query: Application.get_env(:slidething, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Slidething.PubSub},
       # Registry for tracking agent processes by {run_id, agent_type, scope}
       {Registry, keys: :unique, name: Slidething.AgentRegistry},

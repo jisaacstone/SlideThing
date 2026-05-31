@@ -1,15 +1,14 @@
 defmodule SlidethingWeb do
   @moduledoc """
   The entrypoint for defining your web interface, such
-  as controllers, components, channels, and so on.
+  as controllers, channels, and so on.
 
   This can be used in your application as:
 
       use SlidethingWeb, :controller
-      use SlidethingWeb, :html
 
   The definitions below will be executed for every controller,
-  component, etc, so keep them short and clean, focused
+  channel, etc, so keep them short and clean, focused
   on imports, uses and aliases.
 
   Do NOT define functions inside the quoted expressions
@@ -17,13 +16,10 @@ defmodule SlidethingWeb do
   those modules here.
   """
 
-  def static_paths, do: ~w(assets fonts images favicon.ico robots.txt)
-
   def router do
     quote do
       use Phoenix.Router, helpers: false
 
-      # Import common connection and controller functions to use in pipelines
       import Plug.Conn
       import Phoenix.Controller
     end
@@ -37,7 +33,7 @@ defmodule SlidethingWeb do
 
   def controller do
     quote do
-      use Phoenix.Controller, formats: [:html, :json]
+      use Phoenix.Controller, formats: [:json]
 
       import Plug.Conn
 
@@ -49,13 +45,12 @@ defmodule SlidethingWeb do
     quote do
       use Phoenix.VerifiedRoutes,
         endpoint: SlidethingWeb.Endpoint,
-        router: SlidethingWeb.Router,
-        statics: SlidethingWeb.static_paths()
+        router: SlidethingWeb.Router
     end
   end
 
   @doc """
-  When used, dispatch to the appropriate controller/live_view/etc.
+  When used, dispatch to the appropriate controller/channel/etc.
   """
   defmacro __using__(which) when is_atom(which) do
     apply(__MODULE__, which, [])
