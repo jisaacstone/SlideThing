@@ -7,23 +7,26 @@ defmodule Slidething.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      SlidethingWeb.Telemetry,
-      Slidething.Repo,
-      {Phoenix.PubSub, name: Slidething.PubSub},
-      # Registry for tracking agent processes by {run_id, agent_type, scope}
-      {Registry, keys: :unique, name: Slidething.AgentRegistry},
-      # Registry for tracking orchestrators by run_id
-      {Registry, keys: :unique, name: Slidething.RunRegistry},
-      # DynamicSupervisor for per-run supervision trees
-      {DynamicSupervisor, name: Slidething.RunSupervisor, strategy: :one_for_one},
-      # Task.Supervisor for IO-bound work (LLM calls, image generation, HTTP)
-      {Task.Supervisor, name: Slidething.IOTaskSupervisor},
-      # Agent configuration from agents.json
-      Slidething.Agent.Config,
-      # Start to serve requests, typically the last entry
-      SlidethingWeb.Endpoint
-    ]
+    children =
+      [
+        SlidethingWeb.Telemetry,
+        Slidething.Repo,
+        {Phoenix.PubSub, name: Slidething.PubSub},
+        # Registry for tracking agent processes by {run_id, agent_type, scope}
+        {Registry, keys: :unique, name: Slidething.AgentRegistry},
+        # Registry for tracking orchestrators by run_id
+        {Registry, keys: :unique, name: Slidething.RunRegistry},
+        # DynamicSupervisor for per-run supervision trees
+        {DynamicSupervisor, name: Slidething.RunSupervisor, strategy: :one_for_one},
+        # Task.Supervisor for IO-bound work (LLM calls, image generation, HTTP)
+        {Task.Supervisor, name: Slidething.IOTaskSupervisor}
+      ] ++
+        if Mix.env() == :test do
+          []
+        else
+          [Slidething.Agent.Config]
+        end ++
+        [SlidethingWeb.Endpoint]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options

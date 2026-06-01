@@ -1087,8 +1087,10 @@ ORDER BY p.created_at DESC LIMIT 10
 
 One default format on startup:
 ```sql
-INSERT INTO formats (id, name, unit, width, height)
-VALUES ('format-default', 'Children Book Square', 'cm', 20.0, 20.0)
+INSERT INTO formats (id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm)
+VALUES ('format-print', 'Children Book Square (Print)', 'cm', 20.0, 20.0, 300, 3.0, 6.0);
+INSERT INTO formats (id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm)
+VALUES ('format-web', 'Children Book Square (Web)', 'cm', 20.0, 20.0, 72, NULL, 6.0);
 ```
 
 ---
@@ -1140,3 +1142,226 @@ Starts the full OTP app, calls `API.start_run/2`, subscribes to PubSub directly 
 - No MIME type filtering — accept anything the browser can display
 - UUID filenames (preserving original extension), no collision risk
 - Operations: `store/2`, `store_from_path/1`, `retrieve/1`, `retrieve_meta/1`, `delete/1`
+
+---
+
+## Implementation Session 2026-06-01 — Phase 5
+
+**Tool registry, format/dimensions, multi-format design**
+
+### Tool Registry (`Slidething.Tool.Registry`)
+
+Replaces the hardcoded `execute_tool/2` in `genserver.ex:208`. Central module — `execute(tool_atom, args, context)` dispatches to real DB/API operations. No mocks in production path.
+
+**Calling convention:** Tools called from within agent GenServer's `handle_tool_requests/2`. Registry returns `%ToolResult{}` structs. Tools NEVER call LLM providers or external APIs directly — that's the agent's job for LLM, and the orchestrator's job for image APIs.
+
+#### Tools by Agent
+
+| Agent | Tools | Description |
+|---|---|---|
+| **Planner** | `create_book`, `create_pages`, `get_book`, `get_outline` | Creates book + page scaffold, reads existing state for refine flows |
+| **Research** | `get_book`, `get_outline`, `update_book_metadata`, `update_page_metadata`, `web_search` | Project-wide decisions. `web_search` optional, disabled for MVP |
+| **Content** | `get_page_elements`, `get_element`, `create_element`, `update_element`, `delete_element` | CRUD on elements + versions. Works per-page |
+| **Media** | `get_element`, `get_page_elements`, `get_format`, `generate_image`, `store_asset` | Reads context, calls image API, persists to filesystem as element version |
+| **Layout** | `get_page_elements`, `get_format`, `get_layout`, `propose_layout` | Reads elements + format geometry, proposes element placement |
+| **Content Critic** | `get_book`, `get_outline`, `get_page_elements` | Read-only. Returns validation issues |
+
+#### Tool Signatures
+
+**Planner:**
+```
+create_book(title, metadata) → {book_id}
+create_pages(book_id, pages: [{position, metadata}]) → [page_id]
+get_book(book_id) → {id, title, metadata, format_ids, pages: [{page_id, position, metadata}]}
+get_outline(book_id) → [{page_id, position, metadata}]
+```
+
+**Research:**
+```
+update_book_metadata(book_id, metadata) → :ok
+update_page_metadata(page_id, metadata) → :ok
+web_search(query) → [{title, url, snippet}]   # disabled for MVP
+```
+
+**Content:**
+```
+get_page_elements(page_id) → [{element_id, element_type, position, locked, latest_version: {content | asset_path | prompt, metadata}}]
+get_element(element_id) → {id, page_id, element_type, position, locked, versions: [{version, content, asset_path, prompt, metadata, created_at}]}
+create_element(page_id, element_type, content, prompt?) → {element_id, version}
+update_element(element_id, content, prompt?) → {element_id, new_version}
+delete_element(element_id) → :ok
+```
+
+**Media:**
+```
+get_format(format_id) → {id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm}
+generate_image(prompt, width_px, height_px) → {temp_asset_path, metadata}  # slow, async
+store_asset(element_id, asset_path, prompt, metadata) → {element_id, version, asset_uuid}
+```
+
+**Layout:**
+```
+get_layout(page_id, format_id) → {layout_version | nil, element_layouts}
+propose_layout(page_id, format_id, element_layouts: [{element_id, bounding_box, style}]) → {layout_version_id}
+```
+
+**Content Critic:**
+```
+get_book(book_id) → {id, title, metadata}
+get_outline(book_id) → [{page_id, position, metadata}]
+get_page_elements(page_id) → [{element_id, element_type, position, latest_version: {content, metadata}}]
+```
+
+---
+
+### Format, Dimensions & DPI
+
+#### Schema Changes
+
+**`formats` table — new columns:**
+```sql
+ALTER TABLE formats ADD COLUMN dpi INTEGER NOT NULL DEFAULT 300;
+ALTER TABLE formats ADD COLUMN bleed_mm REAL;
+ALTER TABLE formats ADD COLUMN safe_margin_mm REAL;
+```
+
+`bleed_mm` and `safe_margin_mm` are `NULL`able — absent for digital-only formats. Print formats set both. The canonical multi-format target is web+print.
+
+**New `book_formats` join table:**
+```sql
+CREATE TABLE book_formats (
+  book_id    TEXT NOT NULL REFERENCES books(id),
+  format_id  TEXT NOT NULL REFERENCES formats(id),
+  UNIQUE(book_id, format_id)
+);
+```
+
+A book can target multiple formats. Each `layout_version` row already has `format_id` — layout exists per `{page_id, format_id}` pair.
+
+#### Seed Data
+
+Two formats on startup:
+```sql
+-- Print format: 20×20cm children's book square, 300 DPI
+INSERT INTO formats (id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm)
+VALUES ('format-print', 'Children Book Square (Print)', 'cm', 20.0, 20.0, 300, 3.0, 6.0);
+
+-- Web/digital preview: half-resolution, no bleed
+INSERT INTO formats (id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm)
+VALUES ('format-web', 'Children Book Square (Web)', 'cm', 20.0, 20.0, 72, NULL, 6.0);
+```
+
+Both default to the same physical size (20×20cm). Print at 300 DPI = ~2362×2362px. Web at 72 DPI = ~567×567px.
+
+#### Computed Geometry (derived, not stored)
+
+From a format row, the layout tool computes:
+```
+pixel_w     = round((width_cm / 2.54) * dpi)
+pixel_h     = round((height_cm / 2.54) * dpi)
+
+-- Safe area (content lives here):
+safe_min_x  = safe_margin_mm
+safe_min_y  = safe_margin_mm
+safe_max_x  = width_mm - safe_margin_mm
+safe_max_y  = height_mm - safe_margin_mm
+
+-- Bleed box (background extends here, only if bleed_mm set):
+bleed_min_x = -bleed_mm
+bleed_min_y = -bleed_mm
+bleed_max_x = width_mm + bleed_mm
+bleed_max_y = height_mm + bleed_mm
+```
+
+`width_mm` / `height_mm` derived from unit conversion if stored in `cm`.
+
+---
+
+### Multi-Format Layout Flow
+
+Content is format-agnostic (one set of text elements, same for all formats). Layout is per-format.
+
+#### Agent Scope Changes
+
+**Layout agent** scope: `{:page, page_id}`. Task context includes `format_id` + computed geometry dict. The agent proposes `element_layouts` in mm coordinates within `safe_rect`. One layout version exists per `{page_id, format_id}` pair.
+
+**Media agent** scope: `{:element, element_id}`. Orchestrator passes `target_width_px`, `target_height_px` from the format with the **highest DPI**. Image generated once, stored once, layout agent scales bounding box per format.
+
+#### Orchestrator Layout Phase
+
+After content + media complete, layout phase spawns agents for each `{page_id, format_id}` pair from the cross-product of book's pages × book's formats:
+
+```
+for each page_id in book.pages:
+  for each format_id in book.formats:
+    spawn LayoutAgent({page: page_id}, context: {format_id, geometry})
+```
+
+Content stays per-page (single agent per page). Layout is the only phase that multiplies by format count.
+
+#### Element API — Deterministic Layer
+
+These are non-agentic, called by tools and by the UI directly:
+
+| Function | Description |
+|---|---|
+| `Element.create(page_id, type, content, attrs)` | New element + version 1, returns `{:ok, element}` |
+| `Element.update(element_id, content, attrs)` | New version, returns `{:ok, element}` |
+| `Element.delete(element_id)` | Soft-delete (mark inactive) |
+| `Element.get(element_id, opts)` | Element + latest version. `opts`: `version`, `history: n` |
+| `Element.list(page_id)` | All active elements on a page with latest versions |
+| `Layout.propose(page_id, format_id, element_layouts)` | Create layout version, returns `{:ok, layout}` |
+| `Layout.get(page_id, format_id)` | Latest layout version for page+format |
+| `Layout.validate(page_id, format_id)` | Run deterministic checks → `[ValidationIssue]` |
+| `Book.create(title, attrs)` | New book, returns `{:ok, book}` |
+| `Book.add_format(book_id, format_id)` | Link book to format |
+| `Book.get(book_id)` | Book with pages, formats |
+| `Page.create(book_id, position, attrs)` | New page, returns `{:ok, page}` |
+
+---
+
+### System Prompts (Initial Drafts)
+
+**Planner:**
+```
+You are a book planner. Given a user prompt, create the book structure.
+1. Use create_book to create the book with appropriate title and metadata.
+2. Use create_pages to create the requested number of pages.
+3. Return a final response with a plan: for each page, describe what content should go on it (text elements, image descriptions).
+Use the tools available to you. Do not write the actual page content — just plan the structure.
+```
+
+**Content (per-page):**
+```
+You are a content writer for a children's book page. You write the actual text content.
+Given a page description, create the appropriate text elements on that page.
+1. Use get_page_elements to see what exists on the page.
+2. Use create_element to add text elements (type: "title", "text", "caption").
+3. Use update_element to revise content.
+Each page should have a clear structure: title, body text, and optionally captions.
+Keep text concise and age-appropriate. Write in a warm, engaging children's book voice.
+```
+
+**Media (per-element):**
+```
+You are an image generation specialist. You create images for children's book pages.
+Given an element context and image description:
+1. Use get_format to understand target dimensions.
+2. Use generate_image with a refined, detailed prompt and the correct pixel dimensions.
+3. Use store_asset to persist the generated image as an element version.
+Make prompts detailed: describe art style, color palette, composition, mood, subject.
+```
+
+**Layout (per-page, per-format):**
+```
+You are a layout designer. You place elements on a page within given dimensions.
+Given page elements and format geometry:
+1. Use get_page_elements to see what elements exist.
+2. Use get_format to understand safe area dimensions (in mm).
+3. Use get_layout to see any existing layout.
+4. Use propose_layout to set bounding boxes and styling for each element.
+Elements should be arranged within the safe area. Images typically fill the upper portion.
+Text should be centered or left-aligned with comfortable margins. Font sizes should be
+appropriate for children's books (large, readable).
+Bounding boxes are in mm coordinates. Style can include font_size, text_align, font_family, z_index.
+```

@@ -166,10 +166,14 @@ defmodule Slidething.Agent.Config do
   defp string_to_atom(val) when is_binary(val), do: String.to_atom(val)
 
   defp override_from_env(spec) do
-    provider = System.get_env("SLIDETHING_PROVIDER") || spec.provider
-    model = System.get_env("SLIDETHING_MODEL") || default_model(provider, spec.model)
+    if System.get_env("MIX_ENV") == "test" do
+      spec
+    else
+      provider = System.get_env("SLIDETHING_PROVIDER") || spec.provider
+      model = System.get_env("SLIDETHING_MODEL") || default_model(provider, spec.model)
 
-    %{spec | provider: provider, model: model}
+      %{spec | provider: provider, model: model}
+    end
   end
 
   defp default_model(provider, current) do

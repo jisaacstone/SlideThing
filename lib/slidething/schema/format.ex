@@ -6,7 +6,10 @@ defmodule Slidething.Schema.Format do
           name: String.t(),
           unit: String.t(),
           width: float(),
-          height: float()
+          height: float(),
+          dpi: integer(),
+          bleed_mm: float() | nil,
+          safe_margin_mm: float() | nil
         }
 
   @primary_key {:id, :string, autogenerate: false}
@@ -15,5 +18,8 @@ defmodule Slidething.Schema.Format do
     field :unit, :string
     field :width, :float
     field :height, :float
+    field :dpi, :integer, default: 300
+    field :bleed_mm, :float
+    field :safe_margin_mm, :float
   end
 end

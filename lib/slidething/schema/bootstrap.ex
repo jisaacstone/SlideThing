@@ -17,6 +17,7 @@ defmodule Slidething.Schema.Bootstrap do
     end)
 
     create_indexes()
+    migrate_formats()
     seed_formats()
     Logger.info("[Bootstrap] Database tables ready")
   end
@@ -76,7 +77,18 @@ defmodule Slidething.Schema.Bootstrap do
         name TEXT NOT NULL,
         unit TEXT NOT NULL,
         width REAL NOT NULL,
-        height REAL NOT NULL
+        height REAL NOT NULL,
+        dpi INTEGER NOT NULL DEFAULT 300,
+        bleed_mm REAL,
+        safe_margin_mm REAL
+      )
+      """,
+
+      book_formats: """
+      CREATE TABLE IF NOT EXISTS book_formats (
+        book_id TEXT NOT NULL REFERENCES books(id),
+        format_id TEXT NOT NULL REFERENCES formats(id),
+        UNIQUE(book_id, format_id)
       )
       """,
 
@@ -121,12 +133,18 @@ defmodule Slidething.Schema.Bootstrap do
     Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_elements_page ON elements(page_id)", [], log: :debug)
     Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_element_versions_element ON element_versions(element_id)", [], log: :debug)
     Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_layout_versions_page ON layout_versions(page_id)", [], log: :debug)
+    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_layout_versions_page_format ON layout_versions(page_id, format_id)", [], log: :debug)
     Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_prompts_book ON prompts(book_id)", [], log: :debug)
     Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_prompts_run ON prompts(run_id)", [], log: :debug)
     Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_prompt_targets_target ON prompt_targets(target_type, target_id)", [], log: :debug)
+    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_book_formats_book ON book_formats(book_id)", [], log: :debug)
   end
 
-  defp seed_formats do
+  defp migrate_formats do
+    add_column_if_missing("formats", "dpi", "INTEGER NOT NULL DEFAULT 300")
+    add_column_if_missing("formats", "bleed_mm", "REAL")
+    add_column_if_missing("formats", "safe_margin_mm", "REAL")
+
     result =
       Ecto.Adapters.SQL.query!(
         Repo,
@@ -135,12 +153,57 @@ defmodule Slidething.Schema.Bootstrap do
         log: :debug
       )
 
-    if result.num_rows == 0 do
-      Logger.info("[Bootstrap] Seeding default format")
+    if result.num_rows > 0 do
+      Logger.info("[Bootstrap] Migrating format-default to format-print")
       Ecto.Adapters.SQL.query!(
         Repo,
-        "INSERT INTO formats (id, name, unit, width, height) VALUES ('format-default', 'Children Book Square', 'cm', 20.0, 20.0)",
+        "UPDATE formats SET id = 'format-print', name = 'Children Book Square (Print)', dpi = 300, bleed_mm = 3.0, safe_margin_mm = 6.0 WHERE id = 'format-default'",
         [],
+        log: :debug
+      )
+    end
+  end
+
+  defp add_column_if_missing(table, column, type) do
+    cols =
+      Ecto.Adapters.SQL.query!(
+        Repo,
+        "PRAGMA table_info(#{table})",
+        [],
+        log: :debug
+      )
+
+    if not Enum.any?(cols.rows, fn row -> Enum.at(row, 1) == column end) do
+      Logger.info("[Bootstrap] Adding column #{table}.#{column}")
+      Ecto.Adapters.SQL.query!(
+        Repo,
+        "ALTER TABLE #{table} ADD COLUMN #{column} #{type}",
+        [],
+        log: :debug
+      )
+    end
+  end
+
+  defp seed_formats do
+    seed_format("format-print", "Children Book Square (Print)", "cm", 20.0, 20.0, 300, 3.0, 6.0)
+    seed_format("format-web", "Children Book Square (Web)", "cm", 20.0, 20.0, 72, nil, 6.0)
+  end
+
+  defp seed_format(id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm) do
+    result =
+      Ecto.Adapters.SQL.query!(
+        Repo,
+        "SELECT id FROM formats WHERE id = ?",
+        [id],
+        log: :debug
+      )
+
+    if result.num_rows == 0 do
+      Logger.info("[Bootstrap] Seeding format: #{id}")
+      Ecto.Adapters.SQL.query!(
+        Repo,
+        "INSERT INTO formats (id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm],
         log: :debug
       )
     end
