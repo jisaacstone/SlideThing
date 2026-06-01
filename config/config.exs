@@ -9,7 +9,8 @@ import Config
 
 config :slidething,
   ecto_repos: [Slidething.Repo],
-  generators: [timestamp_type: :utc_datetime]
+  generators: [timestamp_type: :utc_datetime],
+  media_dir: nil
 
 # Configure the endpoint
 config :slidething, SlidethingWeb.Endpoint,

@@ -66,10 +66,9 @@ defmodule Slidething.Agent.GenServerTest do
   end
 
   describe "start_task/3" do
-    test "transitions to thinking state", %{agent_pid: agent_pid} do
+test "transitions to thinking state", %{agent_pid: agent_pid} do
       AgentGenServer.start_task(agent_pid, "Test task", %{})
-      Process.sleep(50)
-      
+
       state = AgentGenServer.get_state(agent_pid)
       assert state.status in [:thinking, :executing_tools, :done]
       assert length(state.messages) > 0
@@ -103,16 +102,17 @@ defmodule Slidething.Agent.GenServerTest do
       assert_receive {:agent_event, %{event: :completed}}, 2000
     end
 
-    test "sends agent_done to orchestrator on completion", %{
-      agent_pid: agent_pid, 
-      orchestrator_pid: orchestrator_pid
+test "sends agent_done to orchestrator on completion", %{
+      agent_pid: agent_pid,
+      orchestrator_pid: orchestrator_pid,
+      run_id: run_id
     } do
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "agent_events:#{run_id}")
+
       AgentGenServer.start_task(agent_pid, "Create content", %{})
-      
-      # Wait for completion
-      Process.sleep(500)
-      
-      # Coordinator should have received the message
+
+      assert_receive {:agent_event, %{event: :completed}}, 2000
+
       send(orchestrator_pid, :check)
       assert_receive {:received, {:agent_done, ^agent_pid, result}}, 1000
       assert {:patch, _} = result

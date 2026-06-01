@@ -48,9 +48,10 @@ defmodule Slidething.Agent do
     @moduledoc """
     Tool call requested by LLM.
     """
-    defstruct [:tool, :args]
+    defstruct [:call_id, :tool, :args]
 
     @type t :: %__MODULE__{
+            call_id: String.t() | nil,
             tool: atom(),
             args: map()
           }
@@ -60,9 +61,10 @@ defmodule Slidething.Agent do
     @moduledoc """
     Result of tool execution.
     """
-    defstruct [:tool, :success, :data, :error]
+    defstruct [:call_id, :tool, :success, :data, :error]
 
     @type t :: %__MODULE__{
+            call_id: String.t() | nil,
             tool: atom(),
             success: boolean(),
             data: term() | nil,

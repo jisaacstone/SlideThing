@@ -19,6 +19,8 @@ defmodule Slidething.Application do
       {DynamicSupervisor, name: Slidething.RunSupervisor, strategy: :one_for_one},
       # Task.Supervisor for IO-bound work (LLM calls, image generation, HTTP)
       {Task.Supervisor, name: Slidething.IOTaskSupervisor},
+      # Agent configuration from agents.json
+      Slidething.Agent.Config,
       # Start to serve requests, typically the last entry
       SlidethingWeb.Endpoint
     ]
@@ -26,7 +28,17 @@ defmodule Slidething.Application do
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: Slidething.Supervisor]
-    Supervisor.start_link(children, opts)
+    {:ok, pid} = Supervisor.start_link(children, opts)
+
+    Slidething.Schema.Bootstrap.ensure_tables()
+
+    if Mix.env() == :test do
+      Slidething.AssetStore.clean!()
+    else
+      Slidething.AssetStore.ensure_dir!()
+    end
+
+    {:ok, pid}
   end
 
   # Tell Phoenix to update the endpoint configuration

@@ -135,7 +135,7 @@ defmodule Slidething.Agent.GenServer do
 
     task =
       Task.Supervisor.async_nolink(Slidething.IOTaskSupervisor, fn ->
-        mock_llm_call(state.agent_spec, state.messages)
+        Slidething.LLM.Client.complete_json(state.agent_spec, state.messages)
       end)
 
     new_state = %{state | status: :thinking, pending_task: task}
@@ -216,10 +216,11 @@ defmodule Slidething.Agent.GenServer do
           }
 
         :mock_create_element ->
+          content = args[:content] || "generated"
           %ToolResult{
             tool: tool,
             success: true,
-            data: %{element_id: "elem-#{:rand.uniform(1000)}", type: args[:type]}
+            data: %{element_id: "elem-#{:rand.uniform(1000)}", type: args[:type], content: content}
           }
 
         _ ->
@@ -230,7 +231,7 @@ defmodule Slidething.Agent.GenServer do
           }
       end
 
-    broadcast_tool_result(tool, args, result)
+    broadcast_tool_result(result)
     result
   end
 
@@ -271,47 +272,11 @@ defmodule Slidething.Agent.GenServer do
     )
   end
 
-  defp broadcast_tool_result(tool, args, result) do
+  defp broadcast_tool_result(result) do
     Phoenix.PubSub.broadcast(
       Slidething.PubSub,
       "agent_events:all",
-      {:tool_result, %{tool: tool, args: args, result: result, timestamp: DateTime.utc_now()}}
+      {:tool_result, %{tool: result.tool, success: result.success, data: result.data, timestamp: DateTime.utc_now()}}
     )
-  end
-
-  defp mock_llm_call(%AgentSpec{name: :planner}, _messages) do
-    {:final_response, "Mock plan: create 3 pages with content"}
-  end
-
-  defp mock_llm_call(%AgentSpec{name: :content}, messages) do
-    iteration = count_iterations(messages)
-
-    if iteration < 2 do
-      {:tool_requests,
-       [
-         %ToolCall{
-           tool: :mock_create_element,
-           args: %{type: :text, content: "Mock content #{iteration}"}
-         }
-       ]}
-    else
-      {:patch_proposal,
-       %{
-         content_changes: [
-           %{element_id: "elem-1", page_id: "page-1", content: "Final content"}
-         ]
-       }}
-    end
-  end
-
-  defp mock_llm_call(_agent_spec, _messages) do
-    {:final_response, "Mock response"}
-  end
-
-  defp count_iterations(messages) do
-    Enum.count(messages, fn
-      %Message{role: :tool} -> true
-      _ -> false
-    end)
   end
 end

@@ -36,7 +36,6 @@ defmodule Slidething.Agent.OrchestratorTest do
   describe "start_run/3" do
     test "transitions to planning state", %{orchestrator_pid: orchestrator_pid} do
       Orchestrator.start_run(orchestrator_pid, "Create a book", "book-123")
-      Process.sleep(100)
 
       state = Orchestrator.get_state(orchestrator_pid)
       assert state.status in [:planning, :executing, :validating, :done]
@@ -89,8 +88,6 @@ defmodule Slidething.Agent.OrchestratorTest do
       # Run completes
       assert_receive {:run_event, %{event: :completed}}, 1000
 
-      # Final state should be done
-      Process.sleep(100)
       state = Orchestrator.get_state(orchestrator_pid)
       assert state.status == :done
       assert state.completed_at != nil
@@ -144,7 +141,6 @@ defmodule Slidething.Agent.OrchestratorTest do
 
       assert_receive {:run_event, %{event: :failed, data: %{reason: :test_failure}}}, 1000
 
-      Process.sleep(100)
       state = Orchestrator.get_state(orchestrator_pid)
       assert state.status == :failed
     end
@@ -160,7 +156,7 @@ defmodule Slidething.Agent.OrchestratorTest do
       Orchestrator.start_run(orchestrator_pid, "Test", nil)
 
       events =
-        collect_events(5000, [])
+        collect_until_completed([])
         |> Enum.map(fn %{event: event} -> event end)
 
       assert :started in events
@@ -170,13 +166,14 @@ defmodule Slidething.Agent.OrchestratorTest do
       assert :completed in events
     end
 
-    defp collect_events(timeout, acc) do
+    defp collect_until_completed(acc) do
       receive do
+        {:run_event, %{event: :completed} = event} ->
+          Enum.reverse([event | acc])
         {:run_event, event} ->
-          collect_events(timeout, [event | acc])
+          collect_until_completed([event | acc])
       after
-        timeout ->
-          Enum.reverse(acc)
+        5000 -> Enum.reverse(acc)
       end
     end
   end

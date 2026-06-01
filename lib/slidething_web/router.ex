@@ -7,5 +7,8 @@ defmodule SlidethingWeb.Router do
 
   scope "/api", SlidethingWeb do
     pipe_through :api
+
+    post "/runs", RunController, :create
+    get "/runs/:run_id", RunController, :show
   end
 end

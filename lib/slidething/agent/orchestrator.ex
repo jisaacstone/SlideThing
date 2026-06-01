@@ -14,7 +14,7 @@ defmodule Slidething.Agent.Orchestrator do
   use GenServer
   require Logger
 
-  alias Slidething.Agent.{AgentSpec, RunPlan, SubagentTask}
+  alias Slidething.Agent.{RunPlan, SubagentTask}
   alias Slidething.Agent.GenServer, as: AgentGenServer
 
   defstruct [
@@ -62,7 +62,7 @@ defmodule Slidething.Agent.Orchestrator do
   end
 
   def start_run(pid, prompt, book_id) do
-    GenServer.cast(pid, {:start_run, prompt, book_id})
+    GenServer.call(pid, {:start_run, prompt, book_id})
   end
 
   def get_state(pid) do
@@ -93,7 +93,7 @@ defmodule Slidething.Agent.Orchestrator do
   end
 
   @impl true
-  def handle_cast({:start_run, prompt, book_id}, state) do
+  def handle_call({:start_run, prompt, book_id}, _from, state) do
     Logger.info("[Orchestrator] Starting run: #{state.run_id}")
 
     new_state = %{
@@ -107,7 +107,7 @@ defmodule Slidething.Agent.Orchestrator do
     broadcast_event(new_state, :started, %{prompt: prompt, book_id: book_id})
 
     start_planner(new_state)
-    {:noreply, new_state}
+    {:reply, :ok, new_state}
   end
 
   @impl true
@@ -148,16 +148,7 @@ defmodule Slidething.Agent.Orchestrator do
   # Private functions
 
   defp start_planner(state) do
-    planner_spec = %AgentSpec{
-      name: :planner,
-      provider: "mock",
-      model: "mock-model",
-      temperature: 0.2,
-      max_tokens: 2000,
-      max_iterations: 5,
-      system_prompt: "You are a planner agent.",
-      tools: [:mock_get_book]
-    }
+    planner_spec = Slidething.Agent.Config.agent_spec(:planner)
 
     {:ok, pid} =
       start_agent(
@@ -241,16 +232,7 @@ defmodule Slidething.Agent.Orchestrator do
   end
 
   defp start_content_agents(state) do
-    content_spec = %AgentSpec{
-      name: :content,
-      provider: "mock",
-      model: "mock-model",
-      temperature: 0.7,
-      max_tokens: 4000,
-      max_iterations: 10,
-      system_prompt: "You are a content agent.",
-      tools: [:mock_create_element]
-    }
+    content_spec = Slidething.Agent.Config.agent_spec(:content)
 
     tasks = state.plan.tasks
 

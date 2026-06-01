@@ -849,10 +849,294 @@ I’d use these as the first explicit architecture decisions:
 1. Backend and agent runtime: `Elixir + Phoenix`.
 2. Agent framework: custom lightweight runtime, no LangChain/CrewAI equivalent.
 3. Text models: OpenRouter first, through a provider abstraction.
-4. Tool calling: our own structured JSON action loop, not provider-native tool calling as a hard dependency.
+4. Tool calling: provider-native tool calling (OpenAI-style `tools`/`tool_calls` for OpenRouter, `functionDeclarations` for Gemini). Each provider adapter translates internal `Message`/`ToolCall`/`ToolResult` structs to the native format. More reliable, fewer tokens, still swappable via provider adapter.
 5. Image generation: separate provider adapter, not assumed to be OpenRouter.
 6. Credentials: env vars, `.env` only for local development.
 7. DB: SQLite plus filesystem assets.
 8. Validation: LLM content validator, deterministic layout validator.
 
 The biggest open question is image generation: should the first demo actually generate images, or should it generate image prompts/placeholders first and add real image generation immediately after?
+
+---
+
+## Implementation Session 2026-06-01
+
+**Provider abstraction and LLM integration**
+
+### Decisions
+
+1. **Provider-native tool calling** — Use each provider's native tool/function calling API rather than a JSON action loop. Provider adapters translate internal `Message`/`ToolCall`/`ToolResult` structs to provider-native format. More reliable, fewer tokens, still swappable.
+
+2. **Three providers** — Mock (for tests), Gemini (Google AI), OpenRouter (OpenAI-compatible chat). Provider adapter modules implement `Slidething.LLM.Provider` behaviour with `complete_json/2` callback.
+
+3. **Agent config** — `config/agents.json` maps agent types to provider/model settings. Loaded at startup by `Slidething.Agent.Config` GenServer. No secrets in config; keys from env vars (`GOOGLE_API_KEY`, `OPENROUTER_API_KEY`).
+
+4. **`call_id` on ToolCall/ToolResult** — Added to support OpenAI-style tool call correlation. Gemini ignores it. Mock ignores it. Backward compat with existing structs (defaults to nil).
+
+### Architecture
+
+```
+Agent.GenServer.handle_info(:do_llm_call)
+  → LLM.Client.complete_json(agent_spec, messages)
+    → dispatches on agent_spec.provider
+      → Provider.Mock.complete_json/2
+      → Provider.Gemini.complete_json/2
+      → Provider.OpenRouter.complete_json/2
+    → returns {:tool_requests, [ToolCall]} | {:patch_proposal, patch} | {:final_response, msg}
+```
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `config/agents.json` | Secretless agent→provider/model config |
+| `lib/slidething/llm/provider.ex` | `@callback complete_json(agent_spec, [Message]) :: result` |
+| `lib/slidething/llm/provider/mock.ex` | Existing mock logic extracted |
+| `lib/slidething/llm/provider/gemini.ex` | Google Gemini `generateContent` API |
+| `lib/slidething/llm/provider/openrouter.ex` | OpenAI-compatible chat/completions via OpenRouter |
+| `lib/slidething/llm/client.ex` | Dispatches `complete_json/2` by `AgentSpec.provider` |
+| `lib/slidething/agent/config.ex` | GenServer loading/watching `agents.json` |
+
+### Dependencies added
+
+- `req` ~> 0.5 (HTTP client for provider API calls)
+
+---
+
+## Implementation Session 2026-06-01 — Phase 2
+
+**WebSocket communication design**
+
+### Architecture
+
+One Phoenix Channel per book: `"book:#{book_id}"`. Single topic with a `type` field discriminator on each message. The BookChannel GenServer bridges PubSub events (internal) to client-facing websocket messages.
+
+```
+Client (paged.js) ─── join "book:<id>" ─── BookChannel GenServer
+                            │
+        ┌───────────────────┼───────────────────┐
+        │                   │                   │
+   on join:            subscribes to        subscribes to
+   HTTP GET           PubSub events         PubSub events
+   full state        "run_events:*"        "agent_events:*"
+```
+
+Initial page load via REST: `GET /api/books/:id` returns full tree. Websocket delivers only changes after that point.
+
+### Topics
+
+One per book: `"book:#{book_id}"`. No subtopics. Simpler than nested routing.
+
+### Server → Client messages
+
+| `type` | Payload | When |
+|---|---|---|
+| `book_state` | `{book, pages, elements, layout}` | Initial channel join |
+| `element_added` | `{page_id, element}` | Agent creates element |
+| `element_updated` | `{element_id, content, metadata}` | Agent/user edits text |
+| `element_removed` | `{element_id}` | Element deleted |
+| `element_reordered` | `{page_id, order: [element_id]}` | Reorder |
+| `layout_updated` | `{page_id, element_layouts}` | Layout agent produces new layout |
+| `run_progress` | `{run_id, phase, status}` | Orchestrator phase changes |
+| `asset_ready` | `{element_id, asset_url}` | Image generation completes |
+
+### Client → Server messages
+
+| `type` | Payload | When |
+|---|---|---|
+| `prompt` | `{run_id?, prompt, target_id?}` | User sends prompt |
+| `edit_element` | `{element_id, content}` | User edits text in-place |
+| `move_element` | `{element_id, bounding_box}` | User drags element |
+| `lock_element` | `{element_id}` | User locks from regeneration |
+| `reorder_pages` | `{order: [page_id]}` | User reorders pages |
+
+### Diff semantics
+
+Never send full book on every change. `element_updated` sends only `element_id`, new `content`, and optionally changed `metadata`. `layout_updated` sends the full `element_layouts` array for one page. PubSub events are internal-only; the BookChannel transforms them into client-facing message types.
+
+### BookChannel state
+
+- On receiving PubSub events: transforms into client-facing message types, pushes to socket
+
+---
+
+## Implementation Session 2026-06-01 — Phase 3
+
+**Database schema**
+
+### Decisions
+
+1. **Single elements table** with `element_type` discriminator (`text`, `title`, `image`, `caption`) rather than separate text/media tables. Flexible, fewer joins, easy to add types.
+
+2. **Per-element content versioning, per-page layout versioning.** Each `content_change` creates a new `element_versions` row. Layout is versioned atomically per page (one `layout_versions` row). Run-level version boundary: one run = one new version per affected element/layout.
+
+3. **`prompt_targets` join table** for querying prompt history by page/element. No JSON array hacks. `run_id` links prompts to the versions they produced.
+
+4. **No Ecto migrations.** Tables created programmatically at startup via raw SQL. Schema modules use embedded schemas or plain maps; no Ecto schemas with `schema` macro binding to migrations.
+
+### Tables
+
+```
+books
+  id            TEXT PRIMARY KEY  -- UUID
+  title         TEXT
+  metadata      TEXT              -- JSON: theme, target_audience, style
+  created_at    TEXT              -- ISO-8601
+  updated_at    TEXT
+
+pages
+  id            TEXT PRIMARY KEY  -- UUID
+  book_id       TEXT NOT NULL REFERENCES books(id)
+  position      INTEGER NOT NULL  -- ordering
+  metadata      TEXT              -- JSON: description, status
+  created_at    TEXT
+  updated_at    TEXT
+
+elements
+  id            TEXT PRIMARY KEY  -- UUID
+  page_id       TEXT NOT NULL REFERENCES pages(id)
+  element_type  TEXT NOT NULL     -- text | title | image | caption
+  position      INTEGER NOT NULL  -- ordering within page
+  locked        INTEGER DEFAULT 0 -- 1 if user locked from regeneration
+  created_at    TEXT
+  updated_at    TEXT
+
+element_versions
+  id            TEXT PRIMARY KEY  -- UUID
+  element_id    TEXT NOT NULL REFERENCES elements(id)
+  version       INTEGER NOT NULL
+  run_id        TEXT              -- which run produced this
+  content       TEXT              -- for text/title/caption
+  asset_path    TEXT              -- filesystem path for images
+  prompt        TEXT              -- prompt that generated this version
+  metadata      TEXT              -- JSON: content_type, style, etc
+  created_at    TEXT
+
+formats
+  id            TEXT PRIMARY KEY  -- UUID
+  name          TEXT NOT NULL
+  unit          TEXT NOT NULL     -- cm | pt
+  width         REAL NOT NULL
+  height        REAL NOT NULL
+
+layout_versions
+  id            TEXT PRIMARY KEY  -- UUID
+  page_id       TEXT NOT NULL REFERENCES pages(id)
+  format_id     TEXT NOT NULL REFERENCES formats(id)
+  version       INTEGER NOT NULL
+  run_id        TEXT
+  element_layouts TEXT            -- JSON: [{element_id, bounding_box, style}]
+  created_at    TEXT
+
+prompts
+  id            TEXT PRIMARY KEY  -- UUID
+  book_id       TEXT NOT NULL REFERENCES books(id)
+  run_id        TEXT NOT NULL
+  agent_type    TEXT NOT NULL     -- orchestrator | planner | content | layout | media
+  user_prompt   TEXT NOT NULL
+  context       TEXT              -- JSON: freeform metadata
+  result_summary TEXT
+  created_at    TEXT
+
+prompt_targets
+  prompt_id     TEXT NOT NULL REFERENCES prompts(id)
+  target_type   TEXT NOT NULL     -- page | element
+  target_id     TEXT NOT NULL
+  UNIQUE(prompt_id, target_type, target_id)
+```
+
+### Indexes
+
+```
+CREATE INDEX idx_pages_book ON pages(book_id);
+CREATE INDEX idx_elements_page ON elements(page_id);
+CREATE INDEX idx_element_versions_element ON element_versions(element_id);
+CREATE INDEX idx_layout_versions_page ON layout_versions(page_id);
+CREATE INDEX idx_prompts_book ON prompts(book_id);
+CREATE INDEX idx_prompts_run ON prompts(run_id);
+CREATE INDEX idx_prompt_targets_target ON prompt_targets(target_type, target_id);
+```
+
+### Versioning query patterns
+
+Get prompt that produced element "elem-7" version 3:
+```sql
+SELECT p.* FROM prompts p, element_versions ev
+WHERE ev.element_id = 'elem-7' AND ev.version = 3
+  AND p.run_id = ev.run_id
+```
+
+Get full prompt lineage for an element:
+```sql
+SELECT p.user_prompt, ev.version FROM prompts p
+JOIN element_versions ev ON ev.run_id = p.run_id
+JOIN prompt_targets pt ON pt.prompt_id = p.id
+WHERE pt.target_id = 'elem-7' AND pt.target_type = 'element'
+ORDER BY ev.version ASC
+```
+
+Get relevant prompt history for agent context (page level):
+```sql
+SELECT DISTINCT p.* FROM prompts p
+JOIN prompt_targets pt ON pt.prompt_id = p.id
+WHERE p.book_id = ? AND pt.target_id = 'page-3'
+ORDER BY p.created_at DESC LIMIT 10
+```
+
+### Seed data
+
+One default format on startup:
+```sql
+INSERT INTO formats (id, name, unit, width, height)
+VALUES ('format-default', 'Children Book Square', 'cm', 20.0, 20.0)
+```
+
+---
+
+## Implementation Session 2026-06-01 — Phase 4
+
+**PubSub event bus, Phoenix Channels, mix task, asset storage**
+
+### PubSub event bus
+
+All agent runs broadcast to three PubSub topics:
+
+| Topic | Content |
+|---|---|
+| `run_events:#{run_id}` | Phase transitions, completion, failure |
+| `agent_events:#{run_id}` | LLM calls, tool execution per-run |
+| `agent_events:all` | Cross-run tool result monitoring |
+
+Every consumer (Channel, mix task, future MCP server) subscribes to the same topics. No translation layers — each is a thin PubSub subscriber.
+
+### Phoenix Channels (browser UI)
+
+- **`SlidethingWeb.UserSocket`** — `socket "/socket"`, connect all for MVP (no auth)
+- **`SlidethingWeb.RunChannel`** — topic `"run:{run_id}"`
+  - `join/3` — subscribes to `run_events:#{id}` and `agent_events:#{id}`
+  - `handle_in "prompt", ...` — start a new run from the browser (bidirectional)
+  - `handle_info` — relays PubSub events to socket client as `push("run_event", ...)` or `push("agent_event", ...)`
+
+Future: `"book:{book_id}"` channel for state sync (element diffs, layout changes) as described in Phase 2 design.
+
+### Mix task
+
+```
+mix generate "Create a 5-page children's book about a fox"
+```
+
+Starts the full OTP app, calls `API.start_run/2`, subscribes to PubSub directly (no HTTP), prints events with icons in real time. Blocks until completion. Provider can be set via `--provider` flag or `SLIDETHING_PROVIDER` env var.
+
+### Runtime provider switching
+
+- `Slidething.Agent.Config.set(:agent_name, provider: "gemini", model: "gemini-2.5-flash")` — per-agent override at runtime
+- `SLIDETHING_PROVIDER` env var — overrides all agents on startup without editing files
+- `Slidething.Agent.Config.reset/0` — reload from `config/agents.json`
+
+### Media storage
+
+- `Slidething.AssetStore` — filesystem storage under `$XDG_DATA_HOME/slidething/media` (`~/.local/share/slidething/media`)
+- Test env: `/tmp/slidething_test_media`, wiped on startup via `clean!/0`
+- No MIME type filtering — accept anything the browser can display
+- UUID filenames (preserving original extension), no collision risk
+- Operations: `store/2`, `store_from_path/1`, `retrieve/1`, `retrieve_meta/1`, `delete/1`

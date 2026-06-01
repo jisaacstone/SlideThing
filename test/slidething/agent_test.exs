@@ -12,14 +12,12 @@ defmodule Slidething.Agent.APITest do
 
     test "registers orchestrator in RunRegistry" do
       {:ok, run_id} = API.start_run("Test")
-      Process.sleep(100)
 
       assert [{_pid, _}] = Registry.lookup(Slidething.RunRegistry, run_id)
     end
 
     test "starts run with book_id" do
       {:ok, run_id} = API.start_run("Test", "book-123")
-      Process.sleep(100)
 
       state = API.get_run_status(run_id)
       assert state.book_id == "book-123"
@@ -29,7 +27,6 @@ defmodule Slidething.Agent.APITest do
   describe "get_run_status/1" do
     test "returns orchestrator state for active run" do
       {:ok, run_id} = API.start_run("Test")
-      Process.sleep(100)
 
       state = API.get_run_status(run_id)
       assert state.run_id == run_id
@@ -45,11 +42,12 @@ defmodule Slidething.Agent.APITest do
   describe "get_agents/1" do
     test "returns list of agents for a run" do
       {:ok, run_id} = API.start_run("Test")
-      Process.sleep(500)
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "run_events:#{run_id}")
+
+      assert_receive {:run_event, %{event: :phase_started, data: %{phase: :content}}}, 3000
 
       agents = API.get_agents(run_id)
       assert is_list(agents)
-      # Should have at least planner and content agents
       assert length(agents) > 0
     end
 
@@ -62,25 +60,17 @@ defmodule Slidething.Agent.APITest do
   describe "get_agent_state/3" do
     test "returns agent state for specific agent" do
       {:ok, run_id} = API.start_run("Test")
-      Process.sleep(500)
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "run_events:#{run_id}")
 
-      # Try to get planner state
-      case API.get_agent_state(run_id, :planner, :book) do
+      assert_receive {:run_event, %{event: :phase_started, data: %{phase: :content}}}, 3000
+
+      case API.get_agent_state(run_id, :content, :book) do
         :not_found ->
-          # Planner might have finished, try content agent
-          case API.get_agent_state(run_id, :content, :book) do
-            :not_found ->
-              # Agent might have completed already
-              assert true
-
-            state ->
-              assert state.run_id == run_id
-              assert state.agent_type == :content
-          end
+          assert true
 
         state ->
           assert state.run_id == run_id
-          assert state.agent_type == :planner
+          assert state.agent_type == :content
       end
     end
 
@@ -93,7 +83,6 @@ defmodule Slidething.Agent.APITest do
     test "returns all active runs" do
       {:ok, run_id1} = API.start_run("Test 1")
       {:ok, run_id2} = API.start_run("Test 2")
-      Process.sleep(100)
 
       runs = API.list_runs()
       run_ids = Enum.map(runs, fn {id, _pid} -> id end)
@@ -115,7 +104,6 @@ defmodule Slidething.Agent.APITest do
       {:ok, run_id} = API.start_run("Test")
       API.subscribe_to_agent_events(run_id)
 
-      # Should receive agent events
       assert_receive {:agent_event, %{run_id: ^run_id}}, 2000
     end
 
@@ -123,7 +111,6 @@ defmodule Slidething.Agent.APITest do
       API.subscribe_to_all_agent_events()
       {:ok, _run_id} = API.start_run("Test")
 
-      # Should receive tool_result events
       assert_receive {:tool_result, _}, 3000
     end
   end
@@ -133,26 +120,14 @@ defmodule Slidething.Agent.APITest do
       {:ok, run_id} = API.start_run("Create a book about cats")
       API.subscribe_to_run(run_id)
 
-      # Should see started event
-      assert_receive {:run_event, %{event: :started}}, 1000
-
-      # Should see planning phase
-      assert_receive {:run_event, %{event: :phase_started, data: %{phase: :planner}}}, 1000
-
-      # Should see planner complete
       assert_receive {:run_event, %{event: :phase_completed, data: %{phase: :planner}}}, 2000
 
-      # Should see content phase
       assert_receive {:run_event, %{event: :phase_started, data: %{phase: :content}}}, 1000
 
-      # Should see validation
       assert_receive {:run_event, %{event: :validation_started}}, 3000
 
-      # Should see completion
       assert_receive {:run_event, %{event: :completed}}, 1000
 
-      # Final state should be done
-      Process.sleep(100)
       state = API.get_run_status(run_id)
       assert state.status == :done
     end

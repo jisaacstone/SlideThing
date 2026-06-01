@@ -1,0 +1,64 @@
+{
+  "default_provider": "mock",
+  "providers": {
+    "mock": {
+      "kind": "mock"
+    },
+    "gemini": {
+      "kind": "gemini",
+      "api_key_env": "GOOGLE_API_KEY"
+    },
+    "openrouter": {
+      "kind": "openrouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY"
+    }
+  },
+  "agents": {
+    "planner": {
+      "provider": "mock",
+      "model": "mock-model",
+      "temperature": 0.2,
+      "max_tokens": 2000,
+      "max_iterations": 5,
+      "system_prompt": "You are a planner agent.",
+      "tools": ["get_book"]
+    },
+    "content": {
+      "provider": "mock",
+      "model": "mock-model",
+      "temperature": 0.7,
+      "max_tokens": 4000,
+      "max_iterations": 10,
+      "system_prompt": "You are a content agent.",
+      "tools": ["create_element"]
+    },
+    "research": {
+      "provider": "mock",
+      "model": "mock-model",
+      "temperature": 0.3,
+      "max_tokens": 4000,
+      "max_iterations": 5,
+      "system_prompt": "You are a research agent.",
+      "tools": ["get_book"]
+    },
+    "layout": {
+      "provider": "mock",
+      "model": "mock-model",
+      "temperature": 0.3,
+      "max_tokens": 4000,
+      "max_iterations": 5,
+      "system_prompt": "You are a layout agent.",
+      "tools": ["create_element"]
+    },
+    "media": {
+      "provider": "mock",
+      "model": "mock-model",
+      "temperature": 0.5,
+      "max_tokens": 4000,
+      "max_iterations": 5,
+      "system_prompt": "You are a media agent.",
+      "tools": ["create_element"]
+    }
+  }
+}
