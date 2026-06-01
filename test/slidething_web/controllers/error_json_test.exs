@@ -1,5 +1,5 @@
 defmodule SlidethingWeb.ErrorJSONTest do
-  use SlidethingWeb.ConnCase, async: true
+  use ExUnit.Case, async: true
 
   test "renders 404" do
     assert SlidethingWeb.ErrorJSON.render("404.json", %{}) == %{errors: %{detail: "Not Found"}}

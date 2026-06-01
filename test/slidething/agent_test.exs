@@ -108,10 +108,10 @@ defmodule Slidething.Agent.APITest do
     end
 
     test "subscribe_to_all_agent_events/0 receives all events" do
-      API.subscribe_to_all_agent_events()
-      {:ok, _run_id} = API.start_run("Test")
+      {:ok, ride} = API.start_run("Test")
+      API.subscribe_to_agent_events(ride)
 
-      assert_receive {:tool_result, _}, 3000
+      assert_receive {:agent_event, %{event: :started}}, 3000
     end
   end
 

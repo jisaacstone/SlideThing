@@ -1,0 +1,182 @@
+defmodule Slidething.Tool.Schemas do
+  @moduledoc """
+  Shared JSON schemas for all tool function declarations.
+  Used by provider adapters (Gemini, OpenRouter) to generate
+  their provider-specific tool schemas.
+  """
+
+  @schemas %{
+    create_book: %{
+      name: "create_book",
+      description: "Create a new book with title and metadata. Use this FIRST when generating a new book.",
+      parameters: %{
+        type: "object",
+        properties: %{
+          title: %{type: "string", description: "The book title"},
+          metadata: %{type: "object", description: "Book metadata: theme, target_audience, style"}
+        },
+        required: ["title"]
+      }
+    },
+    create_pages: %{
+      name: "create_pages",
+      description: "Create pages for a book. Pass either a count (integer) or a list of page descriptions.",
+      parameters: %{
+        type: "object",
+        properties: %{
+          book_id: %{type: "string", description: "The book ID to add pages to"},
+          pages: %{type: "array", description: "List of page descriptors, each with position and metadata.description", items: %{
+            type: "object",
+            properties: %{
+              position: %{type: "integer"},
+              metadata: %{type: "object", properties: %{description: %{type: "string"}}}
+            }
+          }}
+        },
+        required: ["book_id", "pages"]
+      }
+    },
+    get_book: %{
+      name: "get_book",
+      description: "Get the full book with all pages and elements",
+      parameters: %{
+        type: "object",
+        properties: %{
+          book_id: %{type: "string", description: "The book ID to retrieve"}
+        },
+        required: ["book_id"]
+      }
+    },
+    get_outline: %{
+      name: "get_outline",
+      description: "Get the page outline for a book (page IDs and positions, no elements)",
+      parameters: %{
+        type: "object",
+        properties: %{
+          book_id: %{type: "string", description: "The book ID"}
+        },
+        required: ["book_id"]
+      }
+    },
+    get_page_elements: %{
+      name: "get_page_elements",
+      description: "Get all elements on a specific page with their latest content",
+      parameters: %{
+        type: "object",
+        properties: %{
+          page_id: %{type: "string", description: "The page ID"}
+        },
+        required: ["page_id"]
+      }
+    },
+    get_element: %{
+      name: "get_element",
+      description: "Get a single element with its version history",
+      parameters: %{
+        type: "object",
+        properties: %{
+          element_id: %{type: "string", description: "The element ID"}
+        },
+        required: ["element_id"]
+      }
+    },
+    create_element: %{
+      name: "create_element",
+      description: "Create a new element on a page. Element types: 'title', 'text', 'image', 'caption'.",
+      parameters: %{
+        type: "object",
+        properties: %{
+          page_id: %{type: "string", description: "The page ID to add the element to"},
+          element_type: %{type: "string", description: "Element type: title, text, image, caption"},
+          content: %{type: "string", description: "The text content (for text/title/caption). For images, use an image prompt description."}
+        },
+        required: ["page_id", "element_type", "content"]
+      }
+    },
+    update_element: %{
+      name: "update_element",
+      description: "Update an element's content (creates a new version)",
+      parameters: %{
+        type: "object",
+        properties: %{
+          element_id: %{type: "string", description: "The element ID to update"},
+          content: %{type: "string", description: "The new content"}
+        },
+        required: ["element_id", "content"]
+      }
+    },
+    update_book_metadata: %{
+      name: "update_book_metadata",
+      description: "Update book-level metadata (theme, audience, style)",
+      parameters: %{
+        type: "object",
+        properties: %{
+          book_id: %{type: "string", description: "The book ID"},
+          metadata: %{type: "object", description: "Metadata key-value pairs"}
+        },
+        required: ["book_id", "metadata"]
+      }
+    },
+    update_page_metadata: %{
+      name: "update_page_metadata",
+      description: "Update metadata on a specific page",
+      parameters: %{
+        type: "object",
+        properties: %{
+          page_id: %{type: "string", description: "The page ID"},
+          metadata: %{type: "object", description: "Metadata key-value pairs"}
+        },
+        required: ["page_id", "metadata"]
+      }
+    },
+    get_format: %{
+      name: "get_format",
+      description: "Get format dimensions (width, height, DPI, margins)",
+      parameters: %{
+        type: "object",
+        properties: %{
+          format_id: %{type: "string", description: "The format ID"}
+        },
+        required: ["format_id"]
+      }
+    },
+    generate_image: %{
+      name: "generate_image",
+      description: "Generate an image from a prompt. Returns a temporary asset path. Follow with store_asset.",
+      parameters: %{
+        type: "object",
+        properties: %{
+          prompt: %{type: "string", description: "Detailed image generation prompt"},
+          width: %{type: "integer", description: "Target width in pixels"},
+          height: %{type: "integer", description: "Target height in pixels"}
+        },
+        required: ["prompt"]
+      }
+    },
+    store_asset: %{
+      name: "store_asset",
+      description: "Store a generated image as an element version on a page",
+      parameters: %{
+        type: "object",
+        properties: %{
+          element_id: %{type: "string", description: "The element ID to attach the asset to"},
+          asset_path: %{type: "string", description: "Path returned by generate_image"},
+          prompt: %{type: "string", description: "The prompt used to generate the image"}
+        },
+        required: ["element_id", "asset_path"]
+      }
+    }
+  }
+
+  @doc """
+  Get a tool schema by atom name. Returns nil for unknown tools.
+  """
+  def get(tool_name) when is_atom(tool_name) do
+    Map.get(@schemas, tool_name)
+  end
+
+  @doc """
+  List all known tool names.
+  """
+  def known_tools, do: Map.keys(@schemas)
+end

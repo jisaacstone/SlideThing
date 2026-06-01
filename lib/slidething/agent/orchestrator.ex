@@ -145,7 +145,99 @@ defmodule Slidething.Agent.Orchestrator do
     {:noreply, new_state}
   end
 
-  # Private functions
+  # Private functions — Phase processing
+
+  defp process_phase_results(%{phase: :planner} = state) do
+    results = Map.values(state.agent_results)
+
+    case results do
+      [{:final, plan_text} | _] ->
+        Logger.info("[Orchestrator] Planner completed: #{String.slice(plan_text, 0, 200)}")
+
+        tasks = build_content_tasks_from_planner(plan_text)
+
+        plan = %RunPlan{
+          intent: plan_text,
+          tasks: tasks
+        }
+
+        new_state = %{state | plan: plan, status: :executing, phase: :content}
+        broadcast_event(new_state, :phase_completed, %{phase: :planner, plan: plan, task_count: length(tasks)})
+
+        start_content_agents(new_state)
+
+      _ ->
+        Logger.error("[Orchestrator] Unexpected planner result")
+        %{state | status: :failed}
+    end
+  end
+
+  defp process_phase_results(%{phase: :content} = state) do
+    Logger.info("[Orchestrator] Content phase completed")
+    broadcast_event(state, :phase_completed, %{phase: :content})
+
+    process_phase_results(%{state | status: :validating, phase: :media})
+  end
+
+  defp process_phase_results(%{phase: :media} = state) do
+    Logger.info("[Orchestrator] Media phase skipped (no media agent configured)")
+
+    new_state = %{state | status: :validating}
+    run_validation(new_state)
+  end
+
+  defp process_phase_results(state) do
+    Logger.info("[Orchestrator] Phase #{state.phase} completed — transitioning to validation")
+    run_validation(state)
+  end
+
+  # Private functions — Planner helpers
+
+  defp build_content_tasks_from_planner(plan_text) do
+    case Jason.decode(plan_text) do
+      {:ok, %{"book_id" => _book_id, "pages" => page_plans}} when is_list(page_plans) ->
+        Enum.map(page_plans, fn pp ->
+          page_id = pp["page_id"]
+          desc = pp["description"] || pp["text"] || "Create content for this page"
+
+          %SubagentTask{
+            agent: :content,
+            scope: {:page, page_id},
+            instruction: "Create content for page #{page_id}: #{desc}"
+          }
+        end)
+
+      _ ->
+        book = find_most_recent_book()
+        case Slidething.Book.get_outline(book.id) do
+          {:ok, pages} when pages != [] ->
+            Enum.map(pages, fn p ->
+              desc = Map.get(p.metadata, "description", "") || p.metadata["description"] || ""
+              %SubagentTask{
+                agent: :content,
+                scope: {:page, p.id},
+                instruction: "Create content for page #{p.id} (#{p.position}/#{length(pages)}). #{desc}"
+              }
+            end)
+
+          _ ->
+            [%SubagentTask{agent: :content, scope: :book, instruction: "Create book content: #{String.slice(plan_text, 0, 200)}"}]
+        end
+    end
+  end
+
+  defp find_most_recent_book do
+    result =
+      Slidething.Repo
+      |> Ecto.Adapters.SQL.query!("SELECT id, title FROM books ORDER BY created_at DESC LIMIT 1")
+
+    case result.rows do
+      [] -> raise "No book found — planner did not create one"
+      [[id, title]] -> %{id: id, title: title}
+    end
+  end
+
+  # Private functions — Agent lifecycle
 
   defp start_planner(state) do
     planner_spec = Slidething.Agent.Config.agent_spec(:planner)
@@ -162,6 +254,29 @@ defmodule Slidething.Agent.Orchestrator do
 
     new_state = %{state | pending_agents: Map.put(state.pending_agents, pid, :planner)}
     broadcast_event(new_state, :phase_started, %{phase: :planner})
+    new_state
+  end
+
+  defp start_content_agents(state) do
+    content_spec = Slidething.Agent.Config.agent_spec(:content)
+
+    tasks = state.plan.tasks
+
+    pending =
+      Enum.reduce(tasks, %{}, fn task, acc ->
+        {:ok, pid} = start_agent(state.run_id, task.agent, task.scope, content_spec)
+
+        context = %{
+          scope: task.scope,
+          task_count: length(tasks)
+        }
+
+        AgentGenServer.start_task(pid, task.instruction, context)
+        Map.put(acc, pid, task)
+      end)
+
+    new_state = %{state | pending_agents: pending, agent_results: %{}}
+    broadcast_event(new_state, :phase_started, %{phase: :content, task_count: length(tasks)})
     new_state
   end
 
@@ -192,61 +307,7 @@ defmodule Slidething.Agent.Orchestrator do
     map_size(state.pending_agents) == 0
   end
 
-  defp process_phase_results(%{phase: :planner} = state) do
-    results = Map.values(state.agent_results)
-
-    case results do
-      [{:final, plan_text} | _] ->
-        Logger.info("[Orchestrator] Planner completed: #{plan_text}")
-
-        plan = %RunPlan{
-          intent: plan_text,
-          tasks: [
-            %SubagentTask{agent: :content, scope: :book, instruction: "Create book content"}
-          ]
-        }
-
-        new_state = %{state | plan: plan, status: :executing, phase: :content}
-        broadcast_event(new_state, :phase_completed, %{phase: :planner, plan: plan})
-
-        start_content_agents(new_state)
-
-      _ ->
-        Logger.error("[Orchestrator] Unexpected planner result")
-        %{state | status: :failed}
-    end
-  end
-
-  defp process_phase_results(%{phase: :content} = state) do
-    Logger.info("[Orchestrator] Content phase completed")
-
-    new_state = %{state | status: :validating}
-    broadcast_event(new_state, :phase_completed, %{phase: :content})
-
-    run_validation(new_state)
-  end
-
-  defp process_phase_results(state) do
-    Logger.info("[Orchestrator] Phase #{state.phase} completed")
-    state
-  end
-
-  defp start_content_agents(state) do
-    content_spec = Slidething.Agent.Config.agent_spec(:content)
-
-    tasks = state.plan.tasks
-
-    pending =
-      Enum.reduce(tasks, %{}, fn task, acc ->
-        {:ok, pid} = start_agent(state.run_id, task.agent, task.scope, content_spec)
-        AgentGenServer.start_task(pid, task.instruction, %{})
-        Map.put(acc, pid, task)
-      end)
-
-    new_state = %{state | pending_agents: pending, agent_results: %{}}
-    broadcast_event(new_state, :phase_started, %{phase: :content, task_count: length(tasks)})
-    new_state
-  end
+  # Private functions — Validation and completion
 
   defp run_validation(state) do
     Logger.info("[Orchestrator] Running validation")
@@ -289,6 +350,8 @@ defmodule Slidething.Agent.Orchestrator do
 
     new_state
   end
+
+  # Private functions — Event broadcasting
 
   defp broadcast_event(state, event_type, data) do
     event = %{

@@ -19,19 +19,19 @@
       "provider": "mock",
       "model": "mock-model",
       "temperature": 0.2,
-      "max_tokens": 2000,
-      "max_iterations": 5,
-      "system_prompt": "You are a planner agent.",
-      "tools": ["get_book"]
+      "max_tokens": 4000,
+      "max_iterations": 8,
+      "system_prompt": "You are a book planner for children's books. Given a user prompt, create the book structure.\n\nYOUR JOB:\n1. Use create_book to create the book with an appropriate title and metadata (theme, target_audience, style).\n2. Use create_pages to create the requested number of pages. Each page should have a metadata.description that describes what content should go on that page.\n3. After creating pages, return a final response with a plan: for each page_id, describe what text elements and images should go on it. Format the final response as a valid JSON array of page plans.\n\nIMPORTANT: You MUST use the tools to actually create the book and pages. Do NOT just describe what you would do — actually do it using the tools.",
+      "tools": ["create_book", "create_pages", "get_book", "get_outline"]
     },
     "content": {
       "provider": "mock",
       "model": "mock-model",
       "temperature": 0.7,
       "max_tokens": 4000,
-      "max_iterations": 10,
-      "system_prompt": "You are a content agent.",
-      "tools": ["create_element"]
+      "max_iterations": 15,
+      "system_prompt": "You are a content writer for a children's book. You write the actual text content for book pages.\n\nYOUR JOB:\n1. Use get_page_elements to see what already exists on the page.\n2. Use create_element to add text elements. Use element_type 'title' for page titles, 'text' for body text, 'caption' for image captions.\n3. You can use update_element to revise content if needed.\n\nELEMENT TYPES:\n- 'title': The page heading, short and engaging\n- 'text': The main body text, age-appropriate, warm children's book voice\n- 'image': An image description/prompt (for the media agent to generate later)\n- 'caption': Short text under an image\n\nEach page should have a clear structure: title, body text, and optionally captions. Keep text concise and age-appropriate. Write in a warm, engaging children's book voice. Create ALL needed elements before returning your final response.",
+      "tools": ["get_page_elements", "get_element", "create_element", "update_element"]
     },
     "research": {
       "provider": "mock",
@@ -39,8 +39,8 @@
       "temperature": 0.3,
       "max_tokens": 4000,
       "max_iterations": 5,
-      "system_prompt": "You are a research agent.",
-      "tools": ["get_book"]
+      "system_prompt": "You are a research agent for children's book creation. You make project-wide decisions about theme, audience, and style.",
+      "tools": ["get_book", "get_outline", "update_book_metadata", "update_page_metadata"]
     },
     "layout": {
       "provider": "mock",
@@ -48,8 +48,8 @@
       "temperature": 0.3,
       "max_tokens": 4000,
       "max_iterations": 5,
-      "system_prompt": "You are a layout agent.",
-      "tools": ["create_element"]
+      "system_prompt": "You are a layout designer. You place elements on a page within given dimensions.",
+      "tools": ["get_page_elements", "get_format", "get_element"]
     },
     "media": {
       "provider": "mock",
@@ -57,8 +57,8 @@
       "temperature": 0.5,
       "max_tokens": 4000,
       "max_iterations": 5,
-      "system_prompt": "You are a media agent.",
-      "tools": ["create_element"]
+      "system_prompt": "You are an image generation specialist. You create images for children's book pages.",
+      "tools": ["get_element", "get_format", "generate_image", "store_asset"]
     }
   }
 }

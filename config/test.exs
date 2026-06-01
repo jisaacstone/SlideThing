@@ -2,7 +2,6 @@ import Config
 
 config :slidething, Slidething.Repo,
   database: "priv/repo/slidething_test.db",
-  pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: 5
 
 config :slidething, SlidethingWeb.Endpoint,

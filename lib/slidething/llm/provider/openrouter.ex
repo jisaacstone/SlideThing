@@ -118,7 +118,15 @@ defmodule Slidething.LLM.Provider.OpenRouter do
 
   defp build_openai_tools(tools) do
     Enum.map(tools, fn tool ->
-      schema = tool_schema(tool)
+      schema =
+        case Slidething.Tool.Schemas.get(tool) do
+          nil ->
+            Logger.warning("[OpenRouter] Unknown tool schema: #{tool}")
+            %{name: to_string(tool), description: "Tool: #{tool}", parameters: %{type: "object", properties: %{}}}
+          s ->
+            s
+        end
+
       %{
         type: "function",
         function: %{
@@ -171,42 +179,5 @@ defmodule Slidething.LLM.Provider.OpenRouter do
 
   defp parse_choice(%{"message" => _}) do
     {:final_response, ""}
-  end
-
-  defp tool_schema(:get_book) do
-    %{
-      name: "get_book",
-      description: "Get the current book data",
-      parameters: %{type: "object", properties: %{}, required: []}
-    }
-  end
-
-  defp tool_schema(:create_element) do
-    %{
-      name: "create_element",
-      description: "Create a new element on a page",
-      parameters: %{
-        type: "object",
-        properties: %{
-          type: %{type: "string", description: "Element type: text, title, image"},
-          content: %{type: "string", description: "Content for the element"},
-          page_id: %{type: "string", description: "Target page ID"}
-        },
-        required: ["type"]
-      }
-    }
-  end
-
-  defp tool_schema(:mock_get_book) do
-    tool_schema(:get_book)
-  end
-
-  defp tool_schema(:mock_create_element) do
-    tool_schema(:create_element)
-  end
-
-  defp tool_schema(tool) do
-    Logger.warning("[OpenRouter] Unknown tool: #{tool}, sending empty schema")
-    %{name: to_string(tool), description: "Tool: #{tool}", parameters: %{type: "object", properties: %{}}}
   end
 end

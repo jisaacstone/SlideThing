@@ -158,6 +158,9 @@ defmodule Slidething.LLM.Provider.Gemini do
         {:ok, %{"type" => "final_response", "message" => message}} ->
           {:final_response, message}
 
+        {:ok, %{"book_id" => _}} ->
+          {:final_response, text_content}
+
         {:ok, _json} ->
           {:final_response, text_content}
 
@@ -168,49 +171,15 @@ defmodule Slidething.LLM.Provider.Gemini do
   end
 
   defp build_function_declarations(tools) do
-    Enum.map(tools, fn tool ->
-      tool_schema(tool)
+    tools
+    |> Enum.map(fn tool ->
+      case Slidething.Tool.Schemas.get(tool) do
+        nil ->
+          Logger.warning("[Gemini] Unknown tool schema: #{tool}")
+          %{name: to_string(tool), description: "Tool: #{tool}", parameters: %{type: "object", properties: %{}}}
+        schema ->
+          schema
+      end
     end)
-  end
-
-  defp tool_schema(:get_book) do
-    %{
-      name: "get_book",
-      description: "Get the current book data",
-      parameters: %{
-        type: "object",
-        properties: %{},
-        required: []
-      }
-    }
-  end
-
-  defp tool_schema(:create_element) do
-    %{
-      name: "create_element",
-      description: "Create a new element on a page",
-      parameters: %{
-        type: "object",
-        properties: %{
-          type: %{type: "string", description: "Element type (text, title, image)"},
-          content: %{type: "string", description: "Content for the element"},
-          page_id: %{type: "string", description: "Target page ID"}
-        },
-        required: ["type"]
-      }
-    }
-  end
-
-  defp tool_schema(:mock_get_book) do
-    tool_schema(:get_book)
-  end
-
-  defp tool_schema(:mock_create_element) do
-    tool_schema(:create_element)
-  end
-
-  defp tool_schema(tool) do
-    Logger.warning("[Gemini] Unknown tool: #{tool}, sending empty schema")
-    %{name: to_string(tool), description: "Tool: #{tool}", parameters: %{type: "object", properties: %{}}}
   end
 end

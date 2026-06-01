@@ -13,7 +13,7 @@ defmodule Slidething.Agent.GenServer do
   use GenServer
   require Logger
 
-  alias Slidething.Agent.{AgentSpec, Message, ToolCall, ToolResult}
+  alias Slidething.Agent.{AgentSpec, Message, ToolCall}
 
   defstruct [
     :run_id,
@@ -180,7 +180,7 @@ defmodule Slidething.Agent.GenServer do
     results =
       Enum.map(calls, fn %ToolCall{tool: tool, args: args} ->
         Logger.debug("[#{state.agent_type}] Tool call: #{tool}(#{inspect(args)})")
-        execute_tool(tool, args)
+        Slidething.Tool.Registry.execute(tool, args)
       end)
 
     tool_message = %Message{
@@ -203,36 +203,6 @@ defmodule Slidething.Agent.GenServer do
 
     send(self(), :do_llm_call)
     {:noreply, new_state}
-  end
-
-  defp execute_tool(tool, args) do
-    result =
-      case tool do
-        :mock_get_book ->
-          %ToolResult{
-            tool: tool,
-            success: true,
-            data: %{id: "book-1", title: "Mock Book", pages: []}
-          }
-
-        :mock_create_element ->
-          content = args[:content] || "generated"
-          %ToolResult{
-            tool: tool,
-            success: true,
-            data: %{element_id: "elem-#{:rand.uniform(1000)}", type: args[:type], content: content}
-          }
-
-        _ ->
-          %ToolResult{
-            tool: tool,
-            success: false,
-            error: "Unknown tool: #{tool}"
-          }
-      end
-
-    broadcast_tool_result(result)
-    result
   end
 
   defp complete_agent(state, result) do
@@ -269,14 +239,6 @@ defmodule Slidething.Agent.GenServer do
       Slidething.PubSub,
       "agent_events:#{state.run_id}",
       {:agent_event, event}
-    )
-  end
-
-  defp broadcast_tool_result(result) do
-    Phoenix.PubSub.broadcast(
-      Slidething.PubSub,
-      "agent_events:all",
-      {:tool_result, %{tool: result.tool, success: result.success, data: result.data, timestamp: DateTime.utc_now()}}
-    )
+)
   end
 end
