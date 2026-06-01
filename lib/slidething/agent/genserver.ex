@@ -6,7 +6,7 @@ defmodule Slidething.Agent.GenServer do
   - Accepts tasks via cast (non-blocking)
   - Spawns async Tasks for LLM calls
   - Handles Task results via handle_info
-  - Sends results to coordinator when done
+  - Sends results to orchestrator when done
   - Broadcasts events for monitoring
   """
 
@@ -19,7 +19,7 @@ defmodule Slidething.Agent.GenServer do
     :run_id,
     :agent_type,
     :scope,
-    :coordinator_pid,
+    :orchestrator_pid,
     :agent_spec,
     :status,
     :messages,
@@ -33,7 +33,7 @@ defmodule Slidething.Agent.GenServer do
           run_id: String.t(),
           agent_type: atom(),
           scope: term(),
-          coordinator_pid: pid(),
+          orchestrator_pid: pid(),
           agent_spec: AgentSpec.t(),
           status: :idle | :thinking | :executing_tools | :done | :failed,
           messages: [Message.t()],
@@ -74,7 +74,7 @@ defmodule Slidething.Agent.GenServer do
       run_id: Keyword.fetch!(opts, :run_id),
       agent_type: Keyword.fetch!(opts, :agent_type),
       scope: Keyword.get(opts, :scope),
-      coordinator_pid: Keyword.fetch!(opts, :coordinator_pid),
+      orchestrator_pid: Keyword.fetch!(opts, :orchestrator_pid),
       agent_spec: Keyword.fetch!(opts, :agent_spec),
       status: :idle,
       messages: [],
@@ -240,7 +240,7 @@ defmodule Slidething.Agent.GenServer do
     new_state = %{state | status: :done, result: result, pending_task: nil}
     broadcast_event(new_state, :completed, %{result: result})
 
-    send(state.coordinator_pid, {:agent_done, self(), result})
+    send(state.orchestrator_pid, {:agent_done, self(), result})
     {:noreply, new_state}
   end
 
@@ -250,7 +250,7 @@ defmodule Slidething.Agent.GenServer do
     new_state = %{state | status: :failed, pending_task: nil}
     broadcast_event(new_state, :failed, %{reason: reason})
 
-    send(state.coordinator_pid, {:agent_failed, self(), reason})
+    send(state.orchestrator_pid, {:agent_failed, self(), reason})
     {:noreply, new_state}
   end
 

@@ -10,7 +10,7 @@ defmodule Slidething.Agent.APITest do
       assert String.starts_with?(run_id, "run_")
     end
 
-    test "registers coordinator in RunRegistry" do
+    test "registers orchestrator in RunRegistry" do
       {:ok, run_id} = API.start_run("Test")
       Process.sleep(100)
 
@@ -27,7 +27,7 @@ defmodule Slidething.Agent.APITest do
   end
 
   describe "get_run_status/1" do
-    test "returns coordinator state for active run" do
+    test "returns orchestrator state for active run" do
       {:ok, run_id} = API.start_run("Test")
       Process.sleep(100)
 

@@ -13,7 +13,7 @@ defmodule Slidething.Application do
       {Phoenix.PubSub, name: Slidething.PubSub},
       # Registry for tracking agent processes by {run_id, agent_type, scope}
       {Registry, keys: :unique, name: Slidething.AgentRegistry},
-      # Registry for tracking run coordinators by run_id
+      # Registry for tracking orchestrators by run_id
       {Registry, keys: :unique, name: Slidething.RunRegistry},
       # DynamicSupervisor for per-run supervision trees
       {DynamicSupervisor, name: Slidething.RunSupervisor, strategy: :one_for_one},

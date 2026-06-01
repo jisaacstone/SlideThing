@@ -5,7 +5,7 @@ defmodule Slidething.Agent.API do
   This module provides the main interface for starting and managing agent runs.
   """
 
-  alias Slidething.Agent.RunCoordinator
+  alias Slidething.Agent.Orchestrator
   alias Slidething.Agent.GenServer, as: AgentGenServer
 
   @doc """
@@ -20,10 +20,10 @@ defmodule Slidething.Agent.API do
 
     case DynamicSupervisor.start_child(
            Slidething.RunSupervisor,
-           {RunCoordinator, opts}
+           {Orchestrator, opts}
          ) do
       {:ok, pid} ->
-        RunCoordinator.start_run(pid, prompt, book_id)
+        Orchestrator.start_run(pid, prompt, book_id)
         {:ok, run_id}
 
       {:error, reason} ->
@@ -34,12 +34,12 @@ defmodule Slidething.Agent.API do
   @doc """
   Get the status of a run.
 
-  Returns the coordinator state or :not_found.
+  Returns the orchestrator state or :not_found.
   """
   def get_run_status(run_id) do
     case Registry.lookup(Slidething.RunRegistry, run_id) do
       [{pid, _}] ->
-        RunCoordinator.get_state(pid)
+        Orchestrator.get_state(pid)
 
       [] ->
         :not_found

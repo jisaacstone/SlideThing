@@ -19,7 +19,7 @@ defmodule Slidething.Agent.GenServerTest do
     }
 
     test_pid = self()
-    {:ok, coordinator_pid} = Task.start(fn -> 
+    {:ok, orchestrator_pid} = Task.start(fn -> 
       receive do
         msg -> send(test_pid, {:received, msg})
       after
@@ -31,14 +31,14 @@ defmodule Slidething.Agent.GenServerTest do
       run_id: run_id,
       agent_type: :content,
       scope: {:page, "page-1"},
-      coordinator_pid: coordinator_pid,
+      orchestrator_pid: orchestrator_pid,
       agent_spec: spec
     )
 
     %{
       run_id: run_id,
       agent_pid: agent_pid,
-      coordinator_pid: coordinator_pid,
+      orchestrator_pid: orchestrator_pid,
       spec: spec
     }
   end
@@ -103,9 +103,9 @@ defmodule Slidething.Agent.GenServerTest do
       assert_receive {:agent_event, %{event: :completed}}, 2000
     end
 
-    test "sends agent_done to coordinator on completion", %{
+    test "sends agent_done to orchestrator on completion", %{
       agent_pid: agent_pid, 
-      coordinator_pid: coordinator_pid
+      orchestrator_pid: orchestrator_pid
     } do
       AgentGenServer.start_task(agent_pid, "Create content", %{})
       
@@ -113,7 +113,7 @@ defmodule Slidething.Agent.GenServerTest do
       Process.sleep(500)
       
       # Coordinator should have received the message
-      send(coordinator_pid, :check)
+      send(orchestrator_pid, :check)
       assert_receive {:received, {:agent_done, ^agent_pid, result}}, 1000
       assert {:patch, _} = result
     end
@@ -130,7 +130,7 @@ defmodule Slidething.Agent.GenServerTest do
         tools: []
       }
 
-      {:ok, coordinator} = Task.start(fn -> 
+      {:ok, orchestrator} = Task.start(fn -> 
         receive do
           msg -> send(self(), {:received, msg})
         after
@@ -142,7 +142,7 @@ defmodule Slidething.Agent.GenServerTest do
         run_id: run_id,
         agent_type: :content,
         scope: nil,
-        coordinator_pid: coordinator,
+        orchestrator_pid: orchestrator,
         agent_spec: spec
       )
 
@@ -169,9 +169,9 @@ defmodule Slidething.Agent.GenServerTest do
       }
 
       test_pid = self()
-      {:ok, coordinator} = Task.start(fn ->
+      {:ok, orchestrator} = Task.start(fn ->
         receive do
-          msg -> send(test_pid, {:coordinator_received, msg})
+          msg -> send(test_pid, {:orchestrator_received, msg})
         after
           5000 -> :ok
         end
@@ -181,7 +181,7 @@ defmodule Slidething.Agent.GenServerTest do
         run_id: run_id,
         agent_type: :content,
         scope: {:page, "page-fail"},
-        coordinator_pid: coordinator,
+        orchestrator_pid: orchestrator,
         agent_spec: spec
       )
 

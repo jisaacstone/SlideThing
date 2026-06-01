@@ -186,7 +186,7 @@ For MVP this is acceptable. Async media with callback is a future optimization.
 2. **Stateful agent GenServers.** Each agent instance is a GenServer holding
    conversation history, iteration count, and status. Registered via Registry.
 3. **Separate planning process.** Planner is its own GenServer, distinct from
-   the RunCoordinator that sequences execution.
+   the Orchestrator that sequences execution.
 4. **Clear agentic/deterministic boundary.** Agentic = LLM-driven GenServers.
    Deterministic = pure function modules. Tools bridge the two.
 
@@ -206,7 +206,7 @@ Slidething.Application
 Per-run child tree (under :run_supervisor):
 
 Run Supervisor (:one_for_all)
-├── RunCoordinator     # GenServer — orchestrates phases, never blocks
+├── Orchestrator          # GenServer — orchestrates phases, never blocks
 ├── Planner            # GenServer — agentic planning (started immediately)
 ├── ResearchAgent      # GenServer — dynamic, if plan requires
 ├── ContentAgent ×N    # GenServer — dynamic, one per page
@@ -252,11 +252,11 @@ def handle_info({ref, result}, %{pending_task: %{ref: ref}} = state) do
       {:noreply, %{state | messages: new_messages, status: :executing_tools}}
 
     {:patch_proposal, patch} ->
-      send(state.coordinator_pid, {:agent_done, self(), patch})
+       send(state.orchestrator_pid, {:agent_done, self(), patch})
       {:noreply, %{state | status: :done, result: patch}}
 
     {:final_response, msg} ->
-      send(state.coordinator_pid, {:agent_done, self(), msg})
+       send(state.orchestrator_pid, {:agent_done, self(), msg})
       {:noreply, %{state | status: :done, result: msg}}
   end
 end
@@ -269,17 +269,17 @@ end
 ### Message Protocol
 
 ```elixir
-# Coordinator → Agent
-{:start_task, task_description, context, coordinator_pid}
+# Orchestrator → Agent
+{:start_task, task_description, context, orchestrator_pid}
 {:repair, [ValidationIssue.t()]}
 :stop
 
-# Agent → Coordinator
+# Agent → Orchestrator
 {:agent_done, agent_pid, result}
 {:agent_failed, agent_pid, reason}
 {:agent_progress, agent_pid, status}      # for UI updates
 
-# Coordinator internal
+# Orchestrator internal
 {:phase_complete, phase_name, results}
 ```
 
@@ -329,10 +329,10 @@ end
 | **LayoutAgent** | `get_layout`, `get_page_elements`, `get_format`, `propose_layout` |
 | **ContentCritic** | `get_book_brief`, `get_page_elements`, `get_outline` (read-only) |
 
-Deterministic-only operations (called by RunCoordinator, not by agents):
+Deterministic-only operations (called by Orchestrator, not by agents):
 `commit_versions`, `validate_layout`, `apply_patch`
 
-### RunCoordinator State Machine (Fully Async)
+### Orchestrator State Machine (Fully Async)
 
 ```
 :idle → receive {:start, prompt, book_id} → start Planner → :planning
@@ -350,11 +350,11 @@ Deterministic-only operations (called by RunCoordinator, not by agents):
 :failed → broadcast :failed, supervisor stops tree
 ```
 
-Coordinator NEVER blocks. All transitions are message-driven.
+Orchestrator NEVER blocks. All transitions are message-driven.
 
 ### Communication Pattern (handle_cast vs handle_info)
 
-**Coordinator → Agent:** Use `GenServer.cast` (async, no reply expected)
+**Orchestrator → Agent:** Use `GenServer.cast` (async, no reply expected)
 ```elixir
 GenServer.cast(agent_pid, {:start_task, task_desc, context})
 ```
@@ -366,81 +366,9 @@ def handle_info({ref, result}, %{pending_task: %{ref: ref}} = state) do
 end
 ```
 
-**Agent → Coordinator:** Use `send` (plain message, Coordinator receives via `handle_info`)
+**Agent → Orchestrator:** Use `send` (plain message, Orchestrator receives via `handle_info`)
 ```elixir
-send(state.coordinator_pid, {:agent_done, self(), result})
-```
-
-### Agent Scope Flexibility
-
-Agents are NOT restricted to per-page scope. The Planner decides scope based on task:
-
-```elixir
-scope: :book                          # whole book (outline, theme)
-     | {:page, page_id}               # single page
-     | {:pages, [page_id]}            # multiple pages
-     | {:element, element_id}         # single element
-     | {:elements, [element_id]}      # multiple elements
-```
-
-ContentAgent can work on book-level ("create outline"), page-level ("add content to page 3"), 
-or element-level ("rewrite this paragraph"). The agent GenServer doesn't care about scope — 
-it just works with whatever context it's given.
-
-### Monitoring and Observability
-
-**Phoenix LiveDashboard** custom page for real-time agent monitoring:
-- Running agents: type, scope, status, iteration count
-- Conversation history: messages sent to LLM, responses
-- Tool calls: which tools were requested, results
-- Timing: how long each LLM call took
-- Errors: failed tasks, retry attempts
-
-Each agent GenServer broadcasts events via PubSub:
-```elixir
-Phoenix.PubSub.broadcast(Slidething.PubSub, "agent_events:#{run_id}", 
-  {:agent_event, self(), {:started, state.agent_type, state.scope}})
-```
-
-**Agent state inspection** for debugging:
-```elixir
-def handle_call(:get_state, _from, state) do
-  {:reply, state, state}
-end
-```
-
-### Streaming vs Non-Streaming LLM Calls
-
-**MVP:** Start with non-streaming (simpler, easier to parse JSON).
-
-**Future:** Add streaming for better UX:
-```elixir
-Task.Supervisor.async_nolink(:io_task_supervisor, fn ->
-  LLM.Client.stream_json(agent_spec, messages, fn chunk ->
-    send(agent_pid, {:llm_chunk, chunk})
-  end)
-end)
-```
-
-Monitoring dashboard shows progress (iteration count, tool calls) even without streaming.
-
-### Communication Pattern (handle_cast vs handle_info)
-
-**Coordinator → Agent:** Use `GenServer.cast` (async, no reply expected)
-```elixir
-GenServer.cast(agent_pid, {:start_task, task_desc, context})
-```
-
-**Task result → Agent:** Use `handle_info` (Task callbacks are regular messages)
-```elixir
-def handle_info({ref, result}, %{pending_task: %{ref: ref}} = state) do
-  # process LLM result
-end
-```
-
-**Agent → Coordinator:** Use `send` (plain message, Coordinator receives via `handle_info`)
-```elixir
-send(state.coordinator_pid, {:agent_done, self(), result})
+send(state.orchestrator_pid, {:agent_done, self(), result})
 ```
 
 ### Agent Scope Flexibility

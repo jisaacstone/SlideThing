@@ -1,8 +1,8 @@
-defmodule Slidething.Agent.RunCoordinator do
+defmodule Slidething.Agent.Orchestrator do
   @moduledoc """
   Coordinates a single agent run through multiple phases.
 
-  The coordinator:
+  The orchestrator:
   - Manages the state machine (planning → executing → validating → done)
   - Starts agent processes as needed
   - Collects results from agents
@@ -94,7 +94,7 @@ defmodule Slidething.Agent.RunCoordinator do
 
   @impl true
   def handle_cast({:start_run, prompt, book_id}, state) do
-    Logger.info("[RunCoordinator] Starting run: #{state.run_id}")
+    Logger.info("[Orchestrator] Starting run: #{state.run_id}")
 
     new_state = %{
       state
@@ -117,13 +117,13 @@ defmodule Slidething.Agent.RunCoordinator do
 
   @impl true
   def handle_info({:agent_done, agent_pid, _result}, %{status: :failed} = state) do
-    Logger.warning("[RunCoordinator] Ignoring agent_done from #{inspect(agent_pid)} - coordinator already failed")
+    Logger.warning("[Orchestrator] Ignoring agent_done from #{inspect(agent_pid)} - orchestrator already failed")
     {:noreply, state}
   end
 
   @impl true
   def handle_info({:agent_done, agent_pid, result}, state) do
-    Logger.info("[RunCoordinator] Agent completed: #{inspect(agent_pid)}")
+    Logger.info("[Orchestrator] Agent completed: #{inspect(agent_pid)}")
 
     new_state = collect_agent_result(state, agent_pid, result)
 
@@ -137,7 +137,7 @@ defmodule Slidething.Agent.RunCoordinator do
 
   @impl true
   def handle_info({:agent_failed, agent_pid, reason}, state) do
-    Logger.error("[RunCoordinator] Agent failed: #{inspect(agent_pid)} - #{inspect(reason)}")
+    Logger.error("[Orchestrator] Agent failed: #{inspect(agent_pid)} - #{inspect(reason)}")
 
     new_state = %{state | status: :failed}
     broadcast_event(new_state, :failed, %{reason: reason, agent: agent_pid})
@@ -179,7 +179,7 @@ defmodule Slidething.Agent.RunCoordinator do
       run_id: run_id,
       agent_type: agent_type,
       scope: scope,
-      coordinator_pid: self(),
+      orchestrator_pid: self(),
       agent_spec: spec
     ]
 
@@ -206,7 +206,7 @@ defmodule Slidething.Agent.RunCoordinator do
 
     case results do
       [{:final, plan_text} | _] ->
-        Logger.info("[RunCoordinator] Planner completed: #{plan_text}")
+        Logger.info("[Orchestrator] Planner completed: #{plan_text}")
 
         plan = %RunPlan{
           intent: plan_text,
@@ -221,13 +221,13 @@ defmodule Slidething.Agent.RunCoordinator do
         start_content_agents(new_state)
 
       _ ->
-        Logger.error("[RunCoordinator] Unexpected planner result")
+        Logger.error("[Orchestrator] Unexpected planner result")
         %{state | status: :failed}
     end
   end
 
   defp process_phase_results(%{phase: :content} = state) do
-    Logger.info("[RunCoordinator] Content phase completed")
+    Logger.info("[Orchestrator] Content phase completed")
 
     new_state = %{state | status: :validating}
     broadcast_event(new_state, :phase_completed, %{phase: :content})
@@ -236,7 +236,7 @@ defmodule Slidething.Agent.RunCoordinator do
   end
 
   defp process_phase_results(state) do
-    Logger.info("[RunCoordinator] Phase #{state.phase} completed")
+    Logger.info("[Orchestrator] Phase #{state.phase} completed")
     state
   end
 
@@ -267,7 +267,7 @@ defmodule Slidething.Agent.RunCoordinator do
   end
 
   defp run_validation(state) do
-    Logger.info("[RunCoordinator] Running validation")
+    Logger.info("[Orchestrator] Running validation")
     broadcast_event(state, :validation_started, %{})
 
     issues = []
@@ -288,12 +288,12 @@ defmodule Slidething.Agent.RunCoordinator do
   end
 
   defp start_repair(state) do
-    Logger.info("[RunCoordinator] Starting repair cycle #{state.repair_count}")
+    Logger.info("[Orchestrator] Starting repair cycle #{state.repair_count}")
     state
   end
 
   defp complete_run(state) do
-    Logger.info("[RunCoordinator] Run completed successfully")
+    Logger.info("[Orchestrator] Run completed successfully")
 
     new_state = %{
       state
