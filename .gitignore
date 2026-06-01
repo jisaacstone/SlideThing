@@ -5,6 +5,8 @@
 /deps
 /priv
 /.elixir_ls
+.lexical
+.tool-versions
 
 erl_crash.dump
 *.ez
