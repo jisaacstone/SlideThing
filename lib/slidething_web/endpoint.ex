@@ -8,8 +8,7 @@ defmodule SlidethingWeb.Endpoint do
   plug Plug.Static,
     at: "/",
     from: :slidething,
-    gzip: false,
-    only: ~w(css js fonts images favicon.ico index.html)
+    gzip: false
 
   if code_reloading? do
     plug Phoenix.CodeReloader

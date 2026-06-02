@@ -3,7 +3,7 @@
 *.sw?
 /_build
 /deps
-/priv/repo
+/priv
 /.elixir_ls
 .lexical
 .tool-versions

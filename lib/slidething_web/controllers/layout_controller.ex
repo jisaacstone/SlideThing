@@ -14,12 +14,7 @@ defmodule SlidethingWeb.LayoutController do
   end
 
   def list(conn, %{"page_id" => page_id}) do
-    case Layout.get_all(page_id) do
-      {:ok, layouts} ->
-        json(conn, layouts)
-
-      {:error, reason} ->
-        conn |> put_status(500) |> json(%{error: inspect(reason)})
-    end
+    {:ok, layouts} = Layout.get_all(page_id)
+    json(conn, layouts)
   end
 end

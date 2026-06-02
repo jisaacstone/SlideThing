@@ -11,12 +11,14 @@ defmodule Slidething.Agent.API do
   @doc """
   Start a new agent run.
 
+  Optional target_type and target_id scope the run to a specific page or element.
+
   Returns {:ok, run_id} on success.
   """
-  def start_run(prompt, book_id \\ nil) do
+  def start_run(prompt, book_id \\ nil, target_type \\ nil, target_id \\ nil) do
     run_id = generate_run_id()
 
-    opts = [run_id: run_id]
+    opts = [run_id: run_id, target_type: target_type, target_id: target_id]
 
     case DynamicSupervisor.start_child(
            Slidething.RunSupervisor,

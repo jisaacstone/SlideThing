@@ -2,12 +2,21 @@ defmodule SlidethingWeb.RunController do
   use SlidethingWeb, :controller
 
   alias Slidething.Agent.API
+  alias Slidething.Prompt
 
   def create(conn, %{"prompt" => prompt} = params) do
     book_id = params["book_id"]
+    target_type = params["target_type"]
+    target_id = params["target_id"]
 
-    case API.start_run(prompt, book_id) do
+    case API.start_run(prompt, book_id, target_type, target_id) do
       {:ok, run_id} ->
+        Prompt.record(run_id, book_id, prompt,
+          target_type: target_type,
+          target_id: target_id,
+          agent_type: "user"
+        )
+
         conn
         |> put_status(201)
         |> json(%{run_id: run_id})

@@ -1,8 +1,4 @@
-declare global {
-  interface Window {
-    Phoenix: any;
-  }
-}
+import { Socket } from "phoenix";
 
 export interface Book {
   id: string;
@@ -42,17 +38,6 @@ export interface ElementVersion {
   prompt: string | null;
 }
 
-export interface Element {
-  id: string;
-  page_id: string;
-  element_type: string;
-  position: number;
-  locked: boolean;
-  versions: ElementVersion[];
-  created_at: string;
-  updated_at: string;
-}
-
 export interface Layout {
   id: string;
   page_id: string;
@@ -69,22 +54,28 @@ export interface ElementLayoutItem {
   style?: Record<string, any>;
 }
 
-export interface Format {
+export interface PromptEntry {
   id: string;
-  name: string;
-  unit: string;
-  width: number;
-  height: number;
-  dpi: number;
-  bleed_mm: number | null;
-  safe_margin_mm: number | null;
+  run_id: string;
+  agent_type: string;
+  user_prompt: string;
+  result_summary: string | null;
+  targets: PromptTarget[];
+  created_at: string;
+}
+
+export interface PromptTarget {
+  target_type: string;
+  target_id: string;
 }
 
 export interface RunEvent {
-  type: string;
-  status?: string;
-  phase?: string;
-  data?: any;
+  event: string;
+  status: string;
+  phase: string | null;
+  data: any;
+  run_id: string;
+  timestamp: string;
 }
 
 export interface RunStatus {
@@ -102,18 +93,13 @@ class Channel {
   private channels: Record<string, any> = {};
 
   connect() {
-    this.socket = new window.Phoenix.Socket(WS_URL);
+    this.socket = new Socket(WS_URL);
     this.socket.connect();
   }
 
-  join(
-    topic: string,
-    handlers: Record<string, (payload: any) => void> = {}
-  ) {
+  join(topic: string, handlers: Record<string, (payload: any) => void> = {}) {
     const ch = this.socket.channel(topic, {});
-    ch.onMessage = (_ev: string, payload: any) => {
-      return payload;
-    };
+    ch.onMessage = (_ev: string, payload: any) => payload;
 
     ch.on("run_event", (payload: any) => handlers.run_event?.(payload));
     ch.on("agent_event", (payload: any) => handlers.agent_event?.(payload));
@@ -146,12 +132,6 @@ class Channel {
 
 export const channel = new Channel();
 
-export async function fetchBook(bookId: string): Promise<Book> {
-  const res = await fetch(`/api/books/${bookId}`);
-  if (!res.ok) throw new Error(`book not found: ${bookId}`);
-  return res.json();
-}
-
 export async function fetchBooks(): Promise<Book[]> {
   const res = await fetch("/api/books");
   return res.json();
@@ -166,43 +146,39 @@ export async function createBook(title: string): Promise<{ book_id: string; titl
   return res.json();
 }
 
+export async function fetchBook(bookId: string): Promise<Book> {
+  const res = await fetch(`/api/books/${bookId}`);
+  if (!res.ok) throw new Error(`book not found: ${bookId}`);
+  return res.json();
+}
+
 export async function fetchPage(pageId: string): Promise<Page> {
   const res = await fetch(`/api/pages/${pageId}`);
   if (!res.ok) throw new Error(`page not found: ${pageId}`);
   return res.json();
 }
 
-export async function fetchElements(pageId: string): Promise<ElementItem[]> {
-  const res = await fetch(`/api/pages/${pageId}/elements`);
-  if (!res.ok) return [];
-  return res.json();
-}
-
-export async function fetchLayout(pageId: string, formatId: string): Promise<Layout | null> {
-  const res = await fetch(`/api/pages/${pageId}/layouts/${formatId}`);
-  if (!res.ok) return null;
-  return res.json();
-}
-
-export async function fetchLayouts(pageId: string): Promise<Layout[]> {
-  const res = await fetch(`/api/pages/${pageId}/layouts`);
+export async function fetchPrompts(bookId: string, targetId?: string): Promise<PromptEntry[]> {
+  const params = targetId ? `?target_id=${encodeURIComponent(targetId)}` : "";
+  const res = await fetch(`/api/books/${bookId}/prompts${params}`);
   if (!res.ok) return [];
   return res.json();
 }
 
 export async function startRun(
   prompt: string,
-  bookId?: string
+  bookId: string,
+  targetType?: string,
+  targetId?: string
 ): Promise<{ run_id: string }> {
+  const body: Record<string, any> = { prompt, book_id: bookId };
+  if (targetType) body.target_type = targetType;
+  if (targetId) body.target_id = targetId;
+
   const res = await fetch("/api/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, book_id: bookId }),
+    body: JSON.stringify(body),
   });
-  return res.json();
-}
-
-export async function getRunStatus(runId: string): Promise<RunStatus> {
-  const res = await fetch(`/api/runs/${runId}`);
   return res.json();
 }

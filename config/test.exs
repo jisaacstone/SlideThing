@@ -9,7 +9,7 @@ config :slidething, SlidethingWeb.Endpoint,
   secret_key_base: "ajB8VE0P8X7FnxOcsQiWl8xAA3ALB1BozKqBMViY62nIq7yofJ2eO8aPZltMmPjD",
   server: false
 
-config :slidething, :media_dir, "/tmp/slidething_test_media"
+config :slidething, :media_dir, "/tmp/slidething_test_media_#{System.get_env("USER", "unknown")}"
 
 config :logger, level: :warning
 

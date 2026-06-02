@@ -31,11 +31,7 @@ defmodule SlidethingWeb.PageChannel do
       {:ok, page} ->
         elements = Element.list(page_id)
 
-        layouts =
-          case Layout.get_all(page_id) do
-            {:ok, ls} -> ls
-            _ -> []
-          end
+        {:ok, layouts} = Layout.get_all(page_id)
 
         {:reply, {:ok, Map.put(page, :elements, elements) |> Map.put(:layouts, layouts)}, socket}
 
@@ -48,26 +44,17 @@ defmodule SlidethingWeb.PageChannel do
   def handle_in("get_pages", _payload, socket) do
     book_id = socket.assigns.book_id
 
-    case Book.get_outline(book_id) do
-      {:ok, pages} ->
-        full_pages =
-          Enum.map(pages, fn page ->
-            elements = Element.list(page.id)
+    {:ok, pages} = Book.get_outline(book_id)
 
-            layouts =
-              case Layout.get_all(page.id) do
-                {:ok, ls} -> ls
-                _ -> []
-              end
+    full_pages =
+      Enum.map(pages, fn page ->
+        elements = Element.list(page.id)
+        {:ok, layouts} = Layout.get_all(page.id)
 
-            Map.put(page, :elements, elements) |> Map.put(:layouts, layouts)
-          end)
+        Map.put(page, :elements, elements) |> Map.put(:layouts, layouts)
+      end)
 
-        {:reply, {:ok, full_pages}, socket}
-
-      {:error, reason} ->
-        {:reply, {:error, %{reason: inspect(reason)}}, socket}
-    end
+    {:reply, {:ok, full_pages}, socket}
   end
 
   @impl true

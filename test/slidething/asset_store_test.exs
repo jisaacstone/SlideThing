@@ -2,6 +2,8 @@ defmodule Slidething.AssetStoreTest do
   use ExUnit.Case, async: true
   alias Slidething.AssetStore
 
+  @test_dir AssetStore.base_dir()
+
   setup do
     AssetStore.clean!()
     :ok
@@ -31,7 +33,7 @@ defmodule Slidething.AssetStoreTest do
 
   describe "base_dir/0" do
     test "returns the tmp dir in test env" do
-      assert AssetStore.base_dir() == "/tmp/slidething_test_media"
+      assert AssetStore.base_dir() == @test_dir
     end
   end
 
@@ -91,7 +93,7 @@ defmodule Slidething.AssetStoreTest do
   describe "store_from_path/1" do
     test "copies a file into the media directory" do
       png = make_png()
-      tmp = "/tmp/slidething_test_source.png"
+      tmp = Path.join(@test_dir, "source.png")
       File.write!(tmp, png)
 
       {:ok, rel} = AssetStore.store_from_path(tmp)
@@ -138,7 +140,7 @@ defmodule Slidething.AssetStoreTest do
   describe "full_path/1" do
     test "prepends the base directory" do
       full = AssetStore.full_path("photo.png")
-      assert full == "/tmp/slidething_test_media/photo.png"
+      assert full == Path.join(@test_dir, "photo.png")
     end
   end
 end

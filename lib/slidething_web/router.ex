@@ -1,8 +1,17 @@
 defmodule SlidethingWeb.Router do
   use SlidethingWeb, :router
 
+  pipeline :browser do
+    plug :accepts, ["html"]
+  end
+
   pipeline :api do
     plug :accepts, ["json"]
+  end
+
+  scope "/", SlidethingWeb do
+    pipe_through :browser
+    get "/", PageController, :root
   end
 
   scope "/api", SlidethingWeb do
@@ -16,6 +25,7 @@ defmodule SlidethingWeb.Router do
     get    "/books", BookController, :list
     post   "/books", BookController, :create
     get    "/books/:book_id", BookController, :show
+    get    "/books/:book_id/prompts", PromptController, :list
 
     # Pages
     get    "/pages/:page_id", PageController, :show
