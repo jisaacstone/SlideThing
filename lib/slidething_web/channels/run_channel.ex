@@ -12,8 +12,8 @@ defmodule SlidethingWeb.RunChannel do
   end
 
   @impl true
-  def handle_in("prompt", %{"prompt" => prompt}, socket) do
-    book_id = Map.get(socket.assigns, :book_id)
+  def handle_in("prompt", %{"prompt" => prompt} = payload, socket) do
+    book_id = payload["book_id"]
 
     case API.start_run(prompt, book_id) do
       {:ok, run_id} ->

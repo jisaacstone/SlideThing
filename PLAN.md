@@ -1364,4 +1364,114 @@ Elements should be arranged within the safe area. Images typically fill the uppe
 Text should be centered or left-aligned with comfortable margins. Font sizes should be
 appropriate for children's books (large, readable).
 Bounding boxes are in mm coordinates. Style can include font_size, text_align, font_family, z_index.
+
+---
+
+## Implementation Session 2026-06-01 — Phase 6
+
+**Web UI: REST API, Channels, Vue frontend scaffold**
+
+### Decisions
+
+1. **Vue 3 + TypeScript + Vite** for the frontend. No LiveView — too much DOM manipulation (paged.js pagination, drag-to-move, contenteditable) that fights with server-driven rendering.
+
+2. **Phoenix Channels** for real-time state sync and agent progress. Two channels:
+   - `run:{run_id}` — agent progress, phase transitions (existing)
+   - `book:{book_id}` — page/element/layout state sync (new)
+
+3. **REST for initial data load** — `GET /api/books/:id`, `GET /api/pages/:id`, etc. Channel handles diffs thereafter.
+
+4. **`Plug.Static`** serves compiled frontend assets from `priv/static`. Vite builds into that directory.
+
+5. **Layout API** — new `Slidething.Layout` module for deterministic CRUD on `layout_versions`. Mirrors `Slidething.Element` pattern.
+
+6. **Version history skipped** for MVP UI — no timeline/rollback viewer yet.
+
+### Files Created/Modified
+
+#### New Backend Files
+
+| File | Purpose |
+|---|---|
+| `lib/slidething/layout.ex` | Deterministic Layout API — create/update/get/get_all/get_by_id/get_history for layout_versions |
+| `lib/slidething_web/controllers/book_controller.ex` | REST: list/create/show books |
+| `lib/slidething_web/controllers/page_controller.ex` | REST: show page with elements |
+| `lib/slidething_web/controllers/element_controller.ex` | REST: list/show elements |
+| `lib/slidething_web/controllers/layout_controller.ex` | REST: show/list layouts |
+| `lib/slidething_web/controllers/format_controller.ex` | REST: list formats |
+| `lib/slidething_web/controllers/asset_controller.ex` | REST: serve asset files |
+| `lib/slidething_web/channels/page_channel.ex` | Channel: book page/element/layout state sync |
+
+#### Modified Backend Files
+
+| File | Change |
+|---|---|
+| `lib/slidething_web/router.ex` | Added 11 routes: books, pages, elements, layouts, formats, assets |
+| `lib/slidething_web/endpoint.ex` | Added `Plug.Static` for compiled assets |
+| `lib/slidething_web/channels/user_socket.ex` | Added `book:*` channel |
+| `lib/slidething_web/channels/run_channel.ex` | Fixed `book_id` — reads from payload, not assigns |
+| `.gitignore` | Changed `/priv` to `/priv/repo` so static assets are committed |
+
+#### New Frontend Files
+
+| File | Purpose |
+|---|---|
+| `assets/package.json` | Vue 3, Phoenix, TypeScript, Vite |
+| `assets/tsconfig.json` | Strict TS with Vue JSX support |
+| `assets/vite.config.js` | Vite + Vue plugin, proxy /api + /socket to Phoenix, output to ../priv/static |
+| `assets/index.html` | Entry HTML with `#app` mount |
+| `assets/src/main.ts` | Vue app bootstrap |
+| `assets/src/env.d.ts` | Vue SFC type declarations |
+| `assets/src/api.ts` | Typed API client: REST fetchers + Phoenix Channel wrapper |
+| `assets/src/App.vue` | Main Vue component: sidebar (books), page grid, prompt bar |
+| `assets/src/components/` | Placeholder directory for future components |
+| `assets/public/` | Public assets directory |
+
+### API Routes
+
+```
+POST   /api/runs                           — Start agent run
+GET    /api/runs/:run_id                    — Get run status
+GET    /api/books                           — List all books
+POST   /api/books                           — Create book
+GET    /api/books/:book_id                  — Get book with pages
+GET    /api/pages/:page_id                  — Get page with elements
+GET    /api/pages/:page_id/elements         — List elements on page
+GET    /api/elements/:element_id            — Get element with versions
+GET    /api/pages/:page_id/layouts          — List layouts for page
+GET    /api/pages/:page_id/layouts/:fmt_id  — Get specific layout
+GET    /api/books/:book_id/formats          — List book formats
+GET    /api/formats                         — List all formats
+GET    /api/assets/*filename                — Serve stored asset
+```
+
+### WebSocket Channels
+
+```
+"socket:/socket"
+  ├── "run:{run_id}"   → RunChannel   (join, push "prompt", receive run/agent events)
+  └── "book:{book_id}" → PageChannel  (push "get_book", "get_page", "get_pages", receive page/book events)
+```
+
+### Frontend Architecture
+
+```
+App.vue
+├── Sidebar (book list, new book form)
+└── Main
+    ├── Book header (title, page count)
+    ├── Page grid (page cards with preview elements)
+    ├── Prompt bar (textarea + generate button)
+    └── Run status indicator
+```
+
+### Next Steps
+
+1. `npm install && npm run dev` to start Vite dev server
+2. `mix phx.server` to run Phoenix backend
+3. Implement paged.js integration for actual page rendering
+4. Add element editing (drag-to-move, text edit, resize)
+5. Add asset upload
+6. Wire up layout bounding boxes to paged.js
+7. Export (PDF via headless browser)
 ```

@@ -5,6 +5,12 @@ defmodule SlidethingWeb.Endpoint do
     websocket: true,
     longpoll: false
 
+  plug Plug.Static,
+    at: "/",
+    from: :slidething,
+    gzip: false,
+    only: ~w(css js fonts images favicon.ico index.html)
+
   if code_reloading? do
     plug Phoenix.CodeReloader
     plug Phoenix.Ecto.CheckRepoStatus, otp_app: :slidething
