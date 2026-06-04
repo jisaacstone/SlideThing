@@ -7,7 +7,7 @@ defmodule Slidething.Agent.APITest do
     test "creates a new run and returns run_id" do
       assert {:ok, run_id} = API.start_run("Test prompt")
       assert is_binary(run_id)
-      assert String.starts_with?(run_id, "run_")
+      assert byte_size(run_id) >= 16
     end
 
     test "registers orchestrator in RunRegistry" do
@@ -17,10 +17,11 @@ defmodule Slidething.Agent.APITest do
     end
 
     test "starts run with book_id" do
-      {:ok, run_id} = API.start_run("Test", "book-123")
+      {:ok, %{book_id: book_id}} = Slidething.Book.create("Test Book", %{})
+      {:ok, run_id} = API.start_run("Test", book_id)
 
       state = API.get_run_status(run_id)
-      assert state.book_id == "book-123"
+      assert state.book_id == book_id
     end
   end
 
@@ -42,7 +43,7 @@ defmodule Slidething.Agent.APITest do
   describe "get_agents/1" do
     test "returns list of agents for a run" do
       {:ok, run_id} = API.start_run("Test")
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "run_events:#{run_id}")
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       assert_receive {:run_event, %{event: :phase_started, data: %{phase: :content}}}, 3000
 
@@ -60,7 +61,7 @@ defmodule Slidething.Agent.APITest do
   describe "get_agent_state/3" do
     test "returns agent state for specific agent" do
       {:ok, run_id} = API.start_run("Test")
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "run_events:#{run_id}")
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       assert_receive {:run_event, %{event: :phase_started, data: %{phase: :content}}}, 3000
 

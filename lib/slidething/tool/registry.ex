@@ -26,6 +26,7 @@ defmodule Slidething.Tool.Registry do
   defp do_execute(:create_book, %{"title" => title} = args) do
     metadata = args["metadata"] || %{}
     {:ok, data} = Slidething.Book.create(title, metadata)
+    Slidething.Book.add_format(data.book_id, "format-web")
     data
   end
 
@@ -117,18 +118,20 @@ defmodule Slidething.Tool.Registry do
   end
 
   defp do_execute(:generate_image, %{"prompt" => prompt} = args) do
-    width = args["width"] || 1024
-    height = args["height"] || 1024
-    Logger.info("[Tool.Registry] generate_image requested: #{String.slice(prompt, 0, 80)}... (#{width}x#{height})")
+    aspect = args["aspect_ratio"] || "1:1"
+    spec = Slidething.Agent.Config.agent_spec(:media)
+    provider = (spec && spec.image_provider) || "mock"
+    model = (spec && spec.image_model) || "mock-image-model"
 
-    # Stub for now — returns a placeholder. Real implementation calls image API.
-    %{
-      temp_path: "/tmp/slidething_stub_image.png",
-      width: width,
-      height: height,
-      prompt: prompt,
-      note: "Image generation not yet implemented — placeholder returned"
-    }
+    Logger.info("[Tool.Registry] generate_image provider=#{provider} model=#{model} aspect=#{aspect}: #{String.slice(prompt, 0, 80)}")
+
+    case Slidething.Image.Client.generate(provider, model, prompt, aspect) do
+      {:ok, asset_path} ->
+        %{asset_path: asset_path, prompt: prompt, aspect_ratio: aspect}
+
+      {:error, reason} ->
+        raise "Image generation failed: #{inspect(reason)}"
+    end
   end
 
   defp do_execute(:store_asset, %{"element_id" => element_id, "asset_path" => asset_path} = args) do
@@ -139,10 +142,15 @@ defmodule Slidething.Tool.Registry do
     end
   end
 
+  # Layout tools
+  defp do_execute(:propose_layout, %{"page_id" => page_id, "format_id" => format_id, "element_layouts" => layouts} = args) do
+    run_id = args["run_id"]
+    {:ok, data} = Slidething.Layout.create(page_id, format_id, layouts, run_id: run_id)
+    data
+  end
+
   # Unknown tool
   defp do_execute(tool, _args) do
-    Logger.warning("[Tool.Registry] Unknown tool: #{tool}")
-    raise "Unknown tool: #{tool}"
     Logger.warning("[Tool.Registry] Unknown tool: #{tool}")
     raise "Unknown tool: #{tool}"
   end

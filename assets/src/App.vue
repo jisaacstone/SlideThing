@@ -10,6 +10,9 @@
       @select-book="selectBook"
       @create-book="handleCreateBook"
       @select-page="selectPage"
+      @create-page="handleCreatePage"
+      @delete-page="handleDeletePage"
+      @delete-book="handleDeleteBook"
     />
 
     <PageView
@@ -41,6 +44,9 @@ import {
   fetchPage,
   fetchPrompts,
   startRun,
+  deleteBook,
+  deletePage,
+  createPage,
 } from "./api";
 import OutlineSidebar from "./components/OutlineSidebar.vue";
 import PageView from "./components/PageView.vue";
@@ -161,6 +167,28 @@ async function handleCreateBook(title: string) {
   const result = await createBook(trimmed);
   await loadBooks();
   await selectBook(result.book_id);
+}
+
+async function handleCreatePage() {
+  if (!currentBookId.value) return;
+  await createPage(currentBookId.value);
+  await loadPages(currentBookId.value);
+}
+
+async function handleDeletePage(pageId: string) {
+  if (!currentBookId.value || !confirm("Delete this page?")) return;
+  await deletePage(pageId);
+  if (selectedPageId.value === pageId) {
+    selectedPageId.value = null;
+    currentPage.value = null;
+  }
+  await loadPages(currentBookId.value);
+}
+
+async function handleDeleteBook() {
+  if (!currentBookId.value || !confirm("Delete this book and all its pages?")) return;
+  await deleteBook(currentBookId.value);
+  await backToBooks();
 }
 
 async function loadPrompts() {

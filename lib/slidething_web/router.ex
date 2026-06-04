@@ -24,11 +24,14 @@ defmodule SlidethingWeb.Router do
     # Books
     get    "/books", BookController, :list
     post   "/books", BookController, :create
+    delete "/books/:book_id", BookController, :delete
     get    "/books/:book_id", BookController, :show
     get    "/books/:book_id/prompts", PromptController, :list
 
     # Pages
+    post   "/books/:book_id/pages", BookController, :create_page
     get    "/pages/:page_id", PageController, :show
+    delete "/pages/:page_id", PageController, :delete
 
     # Elements
     get    "/pages/:page_id/elements", ElementController, :list

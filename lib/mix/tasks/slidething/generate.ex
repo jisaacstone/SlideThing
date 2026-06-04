@@ -5,8 +5,8 @@ defmodule Mix.Tasks.Slidething.Generate do
   ## Usage
 
       mix generate "Create a 5-page children's book about a penguin who wants to fly"
-      SLIDETHING_PROVIDER=gemini mix generate "Create a children's book about a fox"
-      mix generate "Create a book" --provider openrouter
+      mix generate "Create a children's book about a fox" --provider openrouter
+      mix generate "Create a book" --provider openrouter --model google/gemma-4-31b-it:free
 
   Streams agent events in real time. Blocks until completion.
   """
@@ -15,24 +15,41 @@ defmodule Mix.Tasks.Slidething.Generate do
 
   @shortdoc "Generate a children's book"
 
+  @agent_types [:planner, :content, :research, :layout, :media]
+
+  @provider_default_models %{
+    "mock" => "mock-model",
+    "gemini" => "gemini-2.5-flash",
+    "openrouter" => "google/gemma-4-31b-it:free"
+  }
+
+  @image_provider_default_models %{
+    "mock" => "mock-image-model",
+    "gemini" => "imagen-3.0-generate-002",
+    "openrouter" => "black-forest-labs/flux-schnell"
+  }
+
   @impl true
   def run(args) do
     {opts, rest, []} =
-      OptionParser.parse(args, strict: [provider: :string])
+      OptionParser.parse(args,
+        strict: [provider: :string, model: :string, image_provider: :string, image_model: :string]
+      )
 
     prompt = Enum.join(rest, " ")
 
     if prompt == "" do
-      IO.puts("Usage: mix generate \"Your book prompt\" [--provider gemini|mock|openrouter]")
+      IO.puts("Usage: mix generate \"Your book prompt\" [--provider mock|gemini|openrouter] [--model MODEL]")
       System.halt(1)
-    end
-
-    if provider = opts[:provider] do
-      System.put_env("SLIDETHING_PROVIDER", provider)
     end
 
     IO.puts("==> Starting slidething...")
     {:ok, _} = Application.ensure_all_started(:slidething)
+
+    if provider = opts[:provider] do
+      image_provider = opts[:image_provider] || provider
+      apply_provider_override(provider, opts[:model], image_provider, opts[:image_model])
+    end
 
     IO.puts("")
     IO.puts("Prompt: #{prompt}")
@@ -46,6 +63,23 @@ defmodule Mix.Tasks.Slidething.Generate do
     API.subscribe_to_agent_events(run_id)
 
     wait_for_completion()
+  end
+
+  defp apply_provider_override(provider, model_override, image_provider, image_model_override) do
+    model = model_override || Map.get(@provider_default_models, provider, provider)
+    image_model = image_model_override || Map.get(@image_provider_default_models, image_provider, image_provider)
+
+    IO.puts("Provider: #{provider}, Model: #{model}")
+    IO.puts("Image provider: #{image_provider}, Image model: #{image_model}")
+
+    Enum.each(@agent_types, fn agent ->
+      Slidething.Agent.Config.set(agent,
+        provider: provider,
+        model: model,
+        image_provider: image_provider,
+        image_model: image_model
+      )
+    end)
   end
 
   defp wait_for_completion do

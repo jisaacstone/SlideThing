@@ -142,13 +142,12 @@ defmodule Slidething.Tool.Schemas do
     },
     generate_image: %{
       name: "generate_image",
-      description: "Generate an image from a prompt. Returns a temporary asset path. Follow with store_asset.",
+      description: "Generate an image from a prompt at the given aspect ratio. Returns an asset_path stored on disk. Follow with store_asset to attach it to the element.",
       parameters: %{
         type: "object",
         properties: %{
           prompt: %{type: "string", description: "Detailed image generation prompt"},
-          width: %{type: "integer", description: "Target width in pixels"},
-          height: %{type: "integer", description: "Target height in pixels"}
+          aspect_ratio: %{type: "string", description: "Aspect ratio: one of '1:1', '9:16', '16:9', '3:4', '4:3'. Defaults to 1:1."}
         },
         required: ["prompt"]
       }
@@ -164,6 +163,33 @@ defmodule Slidething.Tool.Schemas do
           prompt: %{type: "string", description: "The prompt used to generate the image"}
         },
         required: ["element_id", "asset_path"]
+      }
+    },
+    propose_layout: %{
+      name: "propose_layout",
+      description: "Persist a layout for a (page, format) pair. element_layouts is an array of {element_id, x, y, width, height}; coordinates are 0..1 fractions of the format dimensions.",
+      parameters: %{
+        type: "object",
+        properties: %{
+          page_id: %{type: "string", description: "The page ID"},
+          format_id: %{type: "string", description: "The format ID, e.g. 'format-web'"},
+          element_layouts: %{
+            type: "array",
+            description: "Per-element layout rectangles",
+            items: %{
+              type: "object",
+              properties: %{
+                element_id: %{type: "string"},
+                x: %{type: "number"},
+                y: %{type: "number"},
+                width: %{type: "number"},
+                height: %{type: "number"}
+              },
+              required: ["element_id", "x", "y", "width", "height"]
+            }
+          }
+        },
+        required: ["page_id", "format_id", "element_layouts"]
       }
     }
   }

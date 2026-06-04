@@ -106,16 +106,50 @@ defmodule Slidething.Agent.Config do
   # Private
 
   defp load_config(config_path) do
-    config = read_and_parse(config_path)
-    agents = config["agents"]
+    base = read_and_parse("config/agents.json")
+    base_agents = base["agents"]
 
     spec_map =
-      Map.new(agents, fn {name, attrs} ->
+      Map.new(base_agents, fn {name, attrs} ->
         spec = attrs_to_spec(String.to_atom(name), attrs)
-        {spec.name, override_from_env(spec)}
+        {spec.name, spec}
       end)
 
-    %__MODULE__{config_path: config_path, agents: spec_map}
+    if config_path == "config/agents.json" do
+      %__MODULE__{config_path: config_path, agents: spec_map}
+    else
+      override = read_and_parse(config_path)
+      override_agents = override["agents"] || %{}
+      merged = merge_overrides(spec_map, override_agents)
+      %__MODULE__{config_path: config_path, agents: merged}
+    end
+  end
+
+  defp merge_overrides(spec_map, override_agents) do
+    Map.new(spec_map, fn {name, spec} ->
+      overrides = override_agents[Atom.to_string(name)] || %{}
+
+      provider = override_field(overrides, "provider", spec.provider)
+      model = override_field(overrides, "model", spec.model)
+      image_provider = override_field(overrides, "image_provider", spec.image_provider)
+      image_model = override_field(overrides, "image_model", spec.image_model)
+
+      {name,
+       %{
+         spec
+         | provider: provider,
+           model: model,
+           image_provider: image_provider,
+           image_model: image_model
+       }}
+    end)
+  end
+
+  defp override_field(overrides, key, default) do
+    case Map.get(overrides, key) do
+      v when is_binary(v) -> v
+      _ -> default
+    end
   end
 
   defp read_and_parse(config_path) do
@@ -140,7 +174,9 @@ defmodule Slidething.Agent.Config do
       max_tokens: Map.get(attrs, "max_tokens", 4000),
       max_iterations: Map.get(attrs, "max_iterations", 10),
       system_prompt: Map.get(attrs, "system_prompt", "You are a helpful assistant."),
-      tools: Enum.map(Map.get(attrs, "tools", []), &String.to_atom/1)
+      tools: Enum.map(Map.get(attrs, "tools", []), &String.to_atom/1),
+      image_provider: Map.get(attrs, "image_provider", "mock"),
+      image_model: Map.get(attrs, "image_model", "mock-image-model")
     }
   end
 
@@ -164,23 +200,4 @@ defmodule Slidething.Agent.Config do
 
   defp string_to_atom(val) when is_atom(val), do: val
   defp string_to_atom(val) when is_binary(val), do: String.to_atom(val)
-
-  defp override_from_env(spec) do
-    if System.get_env("MIX_ENV") == "test" do
-      spec
-    else
-      provider = System.get_env("SLIDETHING_PROVIDER") || spec.provider
-      model = System.get_env("SLIDETHING_MODEL") || default_model(provider, spec.model)
-
-      %{spec | provider: provider, model: model}
-    end
-  end
-
-  defp default_model(provider, current) do
-    case {provider, current} do
-      {"gemini", "mock-model"} -> "gemini-2.5-flash"
-      {"openrouter", "mock-model"} -> "anthropic/claude-3.5-haiku"
-      _ -> current
-    end
-  end
 end

@@ -68,6 +68,8 @@ Size of screen - affects image resolution, text size?
 Process model: One Run GenServer per user prompt (started via DynamicSupervisor).
 Agents (Orchestrator, Research, Content, Layout, Media) are stateless modules.
 A shared Agent.Loop module runs the multi-turn LLM tool-call loop for any agent config.
+
+Agent configuration (provider, model, temperature, tools) lives in `config/agents.json` — a single file that maps each agent type to its settings. Provider modules (`Gemini`, `OpenRouter`, `Mock`) implement a common behaviour. API keys come from env vars only. No env-var-based provider switching — edit the file or use `Config.set/2` at runtime.
 Task.Supervisor handles parallel work within phases.
 
 ### Workflow 1: From-Scratch Book Build

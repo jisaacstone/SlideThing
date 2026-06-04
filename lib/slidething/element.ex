@@ -129,8 +129,8 @@ defmodule Slidething.Element do
   Delete an element (marks inactive by clearing page_id).
   """
   def delete(element_id) do
-    query("DELETE FROM elements WHERE id = ?", [element_id])
     query("DELETE FROM element_versions WHERE element_id = ?", [element_id])
+    query("DELETE FROM elements WHERE id = ?", [element_id])
     :ok
   end
 

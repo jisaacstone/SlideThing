@@ -7,6 +7,9 @@
       <div v-else class="sidebar-header-title">
         <h2>Books</h2>
       </div>
+      <button v-if="bookTitle" class="btn-ghost delete-book-btn" @click="$emit('delete-book')" title="Delete book">
+        ✕
+      </button>
     </div>
 
     <div v-if="!bookTitle" class="book-list-view">
@@ -34,6 +37,8 @@
       <h3 class="outline-book-title">{{ bookTitle }}</h3>
       <span class="outline-page-count">{{ pages.length }} pages</span>
 
+      <button class="btn-ghost new-page-btn" @click="$emit('create-page')">+ New Page</button>
+
       <ul class="outline-list">
         <li
           v-for="page in pages"
@@ -44,6 +49,7 @@
         >
           <span class="outline-icon">#</span>
           <span class="outline-label">Page {{ page.position }}</span>
+          <button class="btn-ghost delete-btn" @click.stop="$emit('delete-page', page.id)" title="Delete page">✕</button>
         </li>
       </ul>
     </div>
@@ -66,6 +72,9 @@ defineEmits<{
   "select-book": [bookId: string];
   "create-book": [title: string];
   "select-page": [pageId: string];
+  "create-page": [];
+  "delete-page": [pageId: string];
+  "delete-book": [];
 }>();
 
 const newBookTitle = ref("");
@@ -90,6 +99,37 @@ watch(
 .sidebar-header {
   padding: 16px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.back-btn {
+  background: none;
+  border: none;
+  color: var(--sidebar-text-muted);
+  font-size: 14px;
+  text-align: left;
+  padding: 4px 0;
+}
+
+.back-btn:hover {
+  color: var(--sidebar-text);
+}
+
+.delete-book-btn {
+  background: none;
+  border: none;
+  color: var(--sidebar-text-muted);
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.delete-book-btn:hover {
+  background: rgba(255, 80, 80, 0.2);
+  color: #ff6666;
 }
 
 .sidebar-header-title {
@@ -202,5 +242,38 @@ watch(
 
 .outline-label {
   flex: 1;
+}
+
+.delete-btn {
+  background: none;
+  border: none;
+  color: var(--sidebar-text-muted);
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.delete-btn:hover {
+  background: rgba(255, 80, 80, 0.2);
+  color: #ff6666;
+}
+
+.new-page-btn {
+  background: none;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  color: var(--sidebar-text-muted);
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  width: 100%;
+  margin-top: 12px;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.new-page-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
 }
 </style>

@@ -15,7 +15,9 @@ defmodule Slidething.Agent do
       :max_tokens,
       :max_iterations,
       :system_prompt,
-      :tools
+      :tools,
+      :image_provider,
+      :image_model
     ]
 
     @type t :: %__MODULE__{
@@ -26,7 +28,9 @@ defmodule Slidething.Agent do
             max_tokens: integer(),
             max_iterations: integer(),
             system_prompt: String.t(),
-            tools: [atom()]
+            tools: [atom()],
+            image_provider: String.t() | nil,
+            image_model: String.t() | nil
           }
   end
 

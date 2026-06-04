@@ -4,9 +4,20 @@ defmodule Slidething.Agent.OrchestratorTest do
   alias Slidething.Agent.Orchestrator
 
   setup do
-    run_id = "test_run_#{:rand.uniform(1000)}"
+    run_id = "test_run_#{Ecto.UUID.generate()}"
 
     {:ok, orchestrator_pid} = Orchestrator.start_link(run_id: run_id)
+
+    on_exit(fn ->
+      DynamicSupervisor.which_children(Slidething.RunSupervisor)
+      |> Enum.each(fn
+        {:undefined, pid, :worker, [Slidething.Agent.GenServer]} when is_pid(pid) ->
+          DynamicSupervisor.terminate_child(Slidething.RunSupervisor, pid)
+
+        _ ->
+          :ok
+      end)
+    end)
 
     %{run_id: run_id, orchestrator_pid: orchestrator_pid}
   end
@@ -44,7 +55,7 @@ defmodule Slidething.Agent.OrchestratorTest do
     end
 
     test "broadcasts started event", %{orchestrator_pid: orchestrator_pid, run_id: run_id} do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "run_events:#{run_id}")
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       Orchestrator.start_run(orchestrator_pid, "Test prompt", nil)
 
@@ -52,7 +63,7 @@ defmodule Slidething.Agent.OrchestratorTest do
     end
 
     test "starts planner agent", %{orchestrator_pid: orchestrator_pid, run_id: run_id} do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "run_events:#{run_id}")
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       Orchestrator.start_run(orchestrator_pid, "Test", nil)
 
@@ -66,7 +77,7 @@ defmodule Slidething.Agent.OrchestratorTest do
       orchestrator_pid: orchestrator_pid,
       run_id: run_id
     } do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "run_events:#{run_id}")
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       Orchestrator.start_run(orchestrator_pid, "Create content", nil)
 
@@ -97,17 +108,18 @@ defmodule Slidething.Agent.OrchestratorTest do
       orchestrator_pid: orchestrator_pid,
       run_id: run_id
     } do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "run_events:#{run_id}")
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       Orchestrator.start_run(orchestrator_pid, "Test", nil)
 
       # Wait for planner to complete
-      assert_receive {:run_event, %{event: :phase_completed, data: %{phase: :planner, plan: plan}}},
+      assert_receive {:run_event, %{event: :phase_completed, data: %{phase: :planner}}},
                      2000
 
-      assert plan.intent
-      assert is_list(plan.tasks)
-      assert length(plan.tasks) > 0
+      state = Orchestrator.get_state(orchestrator_pid)
+      assert state.plan != nil
+      assert is_list(state.plan.tasks)
+      assert length(state.plan.tasks) > 0
     end
   end
 
@@ -116,7 +128,7 @@ defmodule Slidething.Agent.OrchestratorTest do
       orchestrator_pid: orchestrator_pid,
       run_id: run_id
     } do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "run_events:#{run_id}")
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       Orchestrator.start_run(orchestrator_pid, "Test", nil)
 
@@ -131,7 +143,7 @@ defmodule Slidething.Agent.OrchestratorTest do
     end
 
     test "handles agent failures", %{orchestrator_pid: orchestrator_pid, run_id: run_id} do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "run_events:#{run_id}")
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       # Start run
       Orchestrator.start_run(orchestrator_pid, "Test", nil)
@@ -139,7 +151,7 @@ defmodule Slidething.Agent.OrchestratorTest do
       # Manually send agent_failed message
       send(orchestrator_pid, {:agent_failed, self(), :test_failure})
 
-      assert_receive {:run_event, %{event: :failed, data: %{reason: :test_failure}}}, 1000
+      assert_receive {:run_event, %{event: :failed, data: %{reason: ":test_failure"}}}, 1000
 
       state = Orchestrator.get_state(orchestrator_pid)
       assert state.status == :failed
@@ -151,7 +163,7 @@ defmodule Slidething.Agent.OrchestratorTest do
       orchestrator_pid: orchestrator_pid,
       run_id: run_id
     } do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "run_events:#{run_id}")
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       Orchestrator.start_run(orchestrator_pid, "Test", nil)
 

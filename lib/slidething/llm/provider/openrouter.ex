@@ -55,9 +55,31 @@ defmodule Slidething.LLM.Provider.OpenRouter do
       {:ok, %{body: %{"choices" => [choice | _]}}} ->
         parse_choice(choice)
 
-      {:ok, %{body: %{"error" => %{"message" => msg}}}} ->
-        Logger.error("[OpenRouter] API error: #{msg}")
-        {:error, msg}
+      {:ok, resp} ->
+        %{status: status, body: err_body} = resp
+
+        error_info =
+          case err_body do
+            %{"error" => error} -> error
+            _ -> err_body
+          end
+
+        err_msg =
+          cond do
+            is_map(error_info) -> Map.get(error_info, "message", "Provider returned error")
+            is_binary(error_info) -> error_info
+            true -> "Provider returned error"
+          end
+
+        Logger.error("[OpenRouter] API error (status=#{status}): #{inspect(err_body)}")
+
+        debug =
+          err_body
+          |> Map.delete("messages")
+          |> Jason.encode!(pretty: true)
+
+        Logger.debug("[OpenRouter] Full error response: #{debug}")
+        {:error, err_msg}
 
       {:error, reason} ->
         Logger.error("[OpenRouter] HTTP error: #{inspect(reason)}")
@@ -65,42 +87,34 @@ defmodule Slidething.LLM.Provider.OpenRouter do
     end
   end
 
-  defp messages_to_openai_messages(messages) do
-    Enum.map(messages, fn msg ->
+  def messages_to_openai_messages(messages) do
+    Enum.flat_map(messages, fn msg ->
       case msg do
         %Message{role: :system} ->
-          %{role: "system", content: msg.content || ""}
+          [%{role: "system", content: msg.content || ""}]
 
         %Message{role: :user} ->
-          %{role: "user", content: msg.content || ""}
+          [%{role: "user", content: msg.content || ""}]
 
         %Message{role: :assistant, content: content, tool_calls: calls} when not is_nil(calls) ->
           base = %{role: "assistant", content: content}
           openai_calls = Enum.map(calls, &tool_call_to_openai/1)
-          Map.put(base, :tool_calls, openai_calls)
+          [Map.put(base, :tool_calls, openai_calls)]
 
         %Message{role: :assistant} ->
-          %{role: "assistant", content: msg.content || ""}
+          [%{role: "assistant", content: msg.content || ""}]
 
         %Message{role: :tool, tool_results: results} when not is_nil(results) ->
-          case results do
-            [single_result] ->
-              %{
-                role: "tool",
-                content: Jason.encode!(%{success: single_result.success, data: single_result.data, error: single_result.error}),
-                tool_call_id: single_result.call_id
-              }
-
-            _ ->
-              %{
-                role: "tool",
-                content: Jason.encode!(Enum.map(results, fn r -> %{tool: r.tool, success: r.success, data: r.data, error: r.error} end)),
-                tool_call_id: "batch"
-              }
-          end
+          Enum.map(results, fn r ->
+            %{
+              role: "tool",
+              content: Jason.encode!(%{success: r.success, data: r.data, error: r.error}),
+              tool_call_id: r.call_id || "call_tool"
+            }
+          end)
 
         %Message{role: :tool} ->
-          %{role: "tool", content: "", tool_call_id: "unknown"}
+          [%{role: "tool", content: "", tool_call_id: "unknown"}]
       end
     end)
   end
@@ -116,7 +130,7 @@ defmodule Slidething.LLM.Provider.OpenRouter do
     }
   end
 
-  defp build_openai_tools(tools) do
+  def build_openai_tools(tools) do
     Enum.map(tools, fn tool ->
       schema =
         case Slidething.Tool.Schemas.get(tool) do
@@ -138,7 +152,7 @@ defmodule Slidething.LLM.Provider.OpenRouter do
     end)
   end
 
-  defp parse_choice(%{"message" => %{"tool_calls" => calls}} = _choice) when not is_nil(calls) do
+  def parse_choice(%{"message" => %{"tool_calls" => calls}} = _choice) when not is_nil(calls) do
     parsed =
       Enum.map(calls, fn call ->
         %ToolCall{
@@ -152,32 +166,11 @@ defmodule Slidething.LLM.Provider.OpenRouter do
     {:tool_requests, parsed}
   end
 
-  defp parse_choice(%{"message" => %{"content" => text}}) when not is_nil(text) and text != "" do
-    case Jason.decode(text) do
-      {:ok, %{"type" => "tool_requests", "calls" => calls}} ->
-        parsed =
-          Enum.map(calls, fn call ->
-            %ToolCall{
-              call_id: Map.get(call, "call_id"),
-              tool: String.to_atom(call["tool"]),
-              args: call["args"] || %{}
-            }
-          end)
-
-        {:tool_requests, parsed}
-
-      {:ok, %{"type" => "patch_proposal", "patch" => patch}} ->
-        {:patch_proposal, patch}
-
-      {:ok, %{"type" => "final_response", "message" => message}} ->
-        {:final_response, message}
-
-      _ ->
-        {:final_response, text}
-    end
+  def parse_choice(%{"message" => %{"content" => text}}) when not is_nil(text) and text != "" do
+    {:final_response, text}
   end
 
-  defp parse_choice(%{"message" => _}) do
+  def parse_choice(%{"message" => _}) do
     {:final_response, ""}
   end
 end

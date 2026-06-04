@@ -38,6 +38,16 @@ export interface ElementVersion {
   prompt: string | null;
 }
 
+export interface Format {
+  name: string;
+  unit: string;
+  width: number;
+  height: number;
+  dpi: number;
+  safe_margin_mm: number;
+  bleed_mm: number;
+}
+
 export interface Layout {
   id: string;
   page_id: string;
@@ -46,11 +56,15 @@ export interface Layout {
   run_id: string | null;
   element_layouts: ElementLayoutItem[];
   created_at: string;
+  format?: Format;
 }
 
 export interface ElementLayoutItem {
   element_id: string;
-  bounding_box: { x: number; y: number; width: number; height: number };
+  x: number;
+  y: number;
+  width: number;
+  height: number;
   style?: Record<string, any>;
 }
 
@@ -180,5 +194,21 @@ export async function startRun(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  return res.json();
+}
+
+export async function deleteBook(bookId: string): Promise<void> {
+  const res = await fetch(`/api/books/${bookId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("delete book failed");
+}
+
+export async function deletePage(pageId: string): Promise<void> {
+  const res = await fetch(`/api/pages/${pageId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("delete page failed");
+}
+
+export async function createPage(bookId: string): Promise<{ id: string; position: number }> {
+  const res = await fetch(`/api/books/${bookId}/pages`, { method: "POST" });
+  if (!res.ok) throw new Error("create page failed");
   return res.json();
 }

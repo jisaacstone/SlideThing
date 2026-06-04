@@ -13,6 +13,7 @@
         v-for="p in prompts"
         :key="p.id"
         class="history-item"
+        @click="editPrompt(p)"
       >
         <div class="history-prompt">{{ p.user_prompt }}</div>
         <div v-if="p.result_summary" class="history-result">
@@ -72,6 +73,10 @@ function submit() {
   if (!text) return;
   emit("submit", text, props.targetType, props.targetId);
   input.value = "";
+}
+
+function editPrompt(p: PromptEntry) {
+  input.value = p.user_prompt;
 }
 
 function truncate(text: string, max: number) {
@@ -147,6 +152,12 @@ function formatDate(iso: string) {
   background: var(--card-bg);
   border-radius: 6px;
   border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.history-item:hover {
+  border-color: var(--primary);
 }
 
 .history-prompt {

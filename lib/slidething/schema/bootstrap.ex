@@ -16,8 +16,10 @@ defmodule Slidething.Schema.Bootstrap do
       Ecto.Adapters.SQL.query!(Repo, sql, [], log: :debug)
     end)
 
-    create_indexes()
     migrate_formats()
+    migrate_prompts()
+    drop_legacy_tables()
+    create_indexes()
     seed_formats()
     Logger.info("[Bootstrap] Database tables ready")
   end
@@ -108,21 +110,43 @@ defmodule Slidething.Schema.Bootstrap do
       CREATE TABLE IF NOT EXISTS prompts (
         id TEXT PRIMARY KEY,
         book_id TEXT NOT NULL REFERENCES books(id),
-        run_id TEXT NOT NULL,
-        agent_type TEXT NOT NULL,
         user_prompt TEXT NOT NULL,
-        context TEXT DEFAULT '{}',
+        target_type TEXT,
+        target_id TEXT,
+        status TEXT NOT NULL DEFAULT 'running',
         result_summary TEXT,
+        completed_at TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
       """,
 
-      prompt_targets: """
-      CREATE TABLE IF NOT EXISTS prompt_targets (
-        prompt_id TEXT NOT NULL REFERENCES prompts(id),
-        target_type TEXT NOT NULL,
-        target_id TEXT NOT NULL,
-        UNIQUE(prompt_id, target_type, target_id)
+      agent_runs: """
+      CREATE TABLE IF NOT EXISTS agent_runs (
+        id TEXT PRIMARY KEY,
+        prompt_id TEXT NOT NULL,
+        agent_type TEXT NOT NULL,
+        scope_type TEXT,
+        scope_id TEXT,
+        provider TEXT,
+        model TEXT,
+        status TEXT NOT NULL DEFAULT 'running',
+        final_result TEXT,
+        failure_reason TEXT,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT
+      )
+      """,
+
+      agent_messages: """
+      CREATE TABLE IF NOT EXISTS agent_messages (
+        id TEXT PRIMARY KEY,
+        agent_run_id TEXT NOT NULL,
+        iteration INTEGER NOT NULL DEFAULT 0,
+        role TEXT NOT NULL,
+        content TEXT,
+        tool_calls TEXT,
+        tool_results TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
       """
     ]
@@ -135,9 +159,54 @@ defmodule Slidething.Schema.Bootstrap do
     Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_layout_versions_page ON layout_versions(page_id)", [], log: :debug)
     Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_layout_versions_page_format ON layout_versions(page_id, format_id)", [], log: :debug)
     Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_prompts_book ON prompts(book_id)", [], log: :debug)
-    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_prompts_run ON prompts(run_id)", [], log: :debug)
-    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_prompt_targets_target ON prompt_targets(target_type, target_id)", [], log: :debug)
+    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_prompts_target ON prompts(target_type, target_id)", [], log: :debug)
+    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_agent_runs_prompt ON agent_runs(prompt_id)", [], log: :debug)
+    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_agent_messages_run ON agent_messages(agent_run_id)", [], log: :debug)
     Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_book_formats_book ON book_formats(book_id)", [], log: :debug)
+  end
+
+  defp migrate_prompts do
+    add_column_if_missing("prompts", "target_type", "TEXT")
+    add_column_if_missing("prompts", "target_id", "TEXT")
+    add_column_if_missing("prompts", "status", "TEXT NOT NULL DEFAULT 'running'")
+    add_column_if_missing("prompts", "completed_at", "TEXT")
+
+    # Drop indexes referencing legacy columns before dropping the columns.
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "DROP INDEX IF EXISTS idx_prompts_run",
+      [],
+      log: :debug
+    )
+
+    drop_column_if_present("prompts", "context")
+    drop_column_if_present("prompts", "run_id")
+    drop_column_if_present("prompts", "agent_type")
+  end
+
+  defp drop_legacy_tables do
+    Ecto.Adapters.SQL.query!(Repo, "DROP TABLE IF EXISTS prompt_targets", [], log: :debug)
+  end
+
+  defp drop_column_if_present(table, column) do
+    cols =
+      Ecto.Adapters.SQL.query!(
+        Repo,
+        "PRAGMA table_info(#{table})",
+        [],
+        log: :debug
+      )
+
+    if Enum.any?(cols.rows, fn row -> Enum.at(row, 1) == column end) do
+      Logger.info("[Bootstrap] Dropping column #{table}.#{column}")
+
+      Ecto.Adapters.SQL.query!(
+        Repo,
+        "ALTER TABLE #{table} DROP COLUMN #{column}",
+        [],
+        log: :debug
+      )
+    end
   end
 
   defp migrate_formats do

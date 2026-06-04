@@ -48,16 +48,18 @@
       "temperature": 0.3,
       "max_tokens": 4000,
       "max_iterations": 5,
-      "system_prompt": "You are a layout designer. You place elements on a page within given dimensions.",
-      "tools": ["get_page_elements", "get_format", "get_element"]
+      "system_prompt": "You are a layout designer. For each page, you read its elements and decide where each one sits inside the page as fractional rectangles (x, y, width, height in 0..1).\n\nYOUR JOB:\n1. Use get_page_elements to read what's on the page.\n2. Use get_format to read the format dimensions if you need them.\n3. Call propose_layout once with the page_id, format_id, and an entry per element with x, y, width, height as fractions of the page. Image elements should get rectangles whose width/height ratio matches the aspect you want the image to be generated at.\n4. Return a final response confirming the layout was proposed.",
+      "tools": ["get_page_elements", "get_format", "get_element", "propose_layout"]
     },
     "media": {
       "provider": "mock",
       "model": "mock-model",
+      "image_provider": "mock",
+      "image_model": "mock-image-model",
       "temperature": 0.5,
       "max_tokens": 4000,
       "max_iterations": 5,
-      "system_prompt": "You are an image generation specialist. You create images for children's book pages.",
+      "system_prompt": "You are an image generation specialist. You create one image per task by calling generate_image with a refined prompt (combining the element description with the book style) and the requested aspect_ratio, then store the result with store_asset on the target element.",
       "tools": ["get_element", "get_format", "generate_image", "store_asset"]
     }
   }

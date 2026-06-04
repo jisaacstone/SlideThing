@@ -5,9 +5,7 @@ defmodule SlidethingWeb.RunChannel do
 
   @impl true
   def join("run:" <> run_id, _payload, socket) do
-    Phoenix.PubSub.subscribe(Slidething.PubSub, "run_events:#{run_id}")
-    Phoenix.PubSub.subscribe(Slidething.PubSub, "agent_events:#{run_id}")
-
+    API.subscribe(run_id)
     {:ok, assign(socket, :run_id, run_id)}
   end
 

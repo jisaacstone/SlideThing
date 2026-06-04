@@ -78,7 +78,7 @@ describe "start_task/3" do
     end
 
     test "broadcasts task_started event", %{agent_pid: agent_pid, run_id: run_id, page_id: page_id} do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "agent_events:#{run_id}")
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       AgentGenServer.start_task(agent_pid, "Create content for page #{page_id}", %{})
 
@@ -88,7 +88,7 @@ describe "start_task/3" do
 
   describe "async LLM pattern" do
     test "executes tool calls and continues loop", %{agent_pid: agent_pid, run_id: run_id, page_id: page_id} do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "agent_events:#{run_id}")
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       AgentGenServer.start_task(agent_pid, "Create content for page #{page_id}", %{})
 
@@ -105,13 +105,77 @@ describe "start_task/3" do
       assert_receive {:agent_event, %{event: :completed}}, 2000
     end
 
+    test "llm_response events are JSON-encodable (no tuples in data)", %{agent_pid: agent_pid, run_id: run_id, page_id: page_id} do
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
+
+      AgentGenServer.start_task(agent_pid, "Create content for page #{page_id}", %{})
+
+      # Collect all llm_response events
+      llm_events = receive_llm_response_events([])
+
+      # Every llm_response event must be JSON-encodable without crashing
+      for event <- llm_events do
+        encoded = Jason.encode!(event)
+        assert is_binary(encoded), "llm_response event should be JSON-encodable"
+      end
+    end
+
+    test "tool calls produce assistant message before tool result", %{agent_pid: agent_pid, run_id: run_id, page_id: page_id} do
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
+
+      AgentGenServer.start_task(agent_pid, "Create content for page #{page_id}", %{})
+
+      # Wait for tools_executed event
+      assert_receive {:agent_event, %{event: :tools_executed}}, 2000
+
+      state = AgentGenServer.get_state(agent_pid)
+
+      # Find the last assistant+tool pair in messages
+      messages = state.messages
+
+      # Verify there's at least one assistant message with tool_calls followed by a tool message
+      has_tool_call_pair =
+        messages
+        |> Enum.chunk_every(2, 1, :discard)
+        |> Enum.any?(fn
+          [%{role: :assistant, tool_calls: calls}, %{role: :tool, tool_results: results}]
+            when not is_nil(calls) and not is_nil(results) ->
+              # The tool_results must carry call_ids matching the tool calls
+              tool_call_ids = Enum.map(calls, & &1.call_id) |> MapSet.new()
+              result_call_ids = Enum.map(results, & &1.call_id) |> MapSet.new()
+              MapSet.equal?(tool_call_ids, result_call_ids)
+
+          _ ->
+            false
+        end)
+
+      assert has_tool_call_pair,
+             "messages must contain assistant(tool_calls) followed by tool(tool_results) with matching call_ids"
+    end
+
+    defp receive_llm_response_events(acc) do
+      receive do
+        {:agent_event, %{event: :llm_response} = event} ->
+          receive_llm_response_events([event | acc])
+
+        {:agent_event, %{event: :completed}} ->
+          acc
+
+        {:agent_event, %{event: :failed}} ->
+          acc
+      after
+        3000 ->
+          acc
+      end
+    end
+
     test "sends agent_done to orchestrator on completion", %{
       agent_pid: agent_pid,
       orchestrator_pid: orchestrator_pid,
       run_id: run_id,
       page_id: page_id
     } do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "agent_events:#{run_id}")
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       AgentGenServer.start_task(agent_pid, "Create content for page #{page_id}", %{})
 
@@ -150,12 +214,12 @@ describe "start_task/3" do
         agent_spec: spec
       )
 
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "agent_events:#{run_id}")
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
       
       AgentGenServer.start_task(agent_pid, "Test", %{})
       
       # Should fail due to max iterations
-      assert_receive {:agent_event, %{event: :failed, data: %{reason: :max_iterations_reached}}}, 2000
+      assert_receive {:agent_event, %{event: :failed, data: %{reason: ":max_iterations_reached"}}}, 2000
     end
   end
 
@@ -192,7 +256,7 @@ describe "start_task/3" do
         agent_spec: spec
       )
 
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "agent_events:#{run_id}")
+      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       AgentGenServer.start_task(agent_pid, "Test for page #{page_id}", %{})
 

@@ -1,12 +1,16 @@
 .env
 .aider*
 *.sw?
-/_build
-/deps
-/priv
-/.elixir_ls
+_build
+deps
+priv
+.elixir_ls
 .lexical
 .tool-versions
 
 erl_crash.dump
 *.ez
+
+# OpenRouter config files (local, not tracked)
+agents-openrouter.json
+agents-openrouter-free.json

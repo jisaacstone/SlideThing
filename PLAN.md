@@ -1125,15 +1125,23 @@ Future: `"book:{book_id}"` channel for state sync (element diffs, layout changes
 
 ```
 mix generate "Create a 5-page children's book about a fox"
+mix generate "Create a book" --provider openrouter --model google/gemma-4-31b-it:free
 ```
 
-Starts the full OTP app, calls `API.start_run/2`, subscribes to PubSub directly (no HTTP), prints events with icons in real time. Blocks until completion. Provider can be set via `--provider` flag or `SLIDETHING_PROVIDER` env var.
+Starts the full OTP app, calls `API.start_run/2`, subscribes to PubSub directly (no HTTP), prints events with icons in real time. Blocks until completion. Provider config comes from `config/agents.json`; `--provider` and `--model` flags override all agents at runtime via `Config.set/2`.
 
 ### Runtime provider switching
 
-- `Slidething.Agent.Config.set(:agent_name, provider: "gemini", model: "gemini-2.5-flash")` — per-agent override at runtime
-- `SLIDETHING_PROVIDER` env var — overrides all agents on startup without editing files
+- `Slidething.Agent.Config.set(:agent_name, provider: "openrouter", model: "google/gemma-4-31b-it:free")` — per-agent override at runtime
+- `--provider openrouter --model xyz` on `mix generate` — override all agents for one run
 - `Slidething.Agent.Config.reset/0` — reload from `config/agents.json`
+- No env-var overrides for provider/model. Config is pure `agents.json`. API keys still come from env vars.
+
+### Launch scripts
+
+- `bin/run-openrouter.sh` — sources `.env` for `OPENROUTER_API_KEY`, runs `mix phx.server`
+- `bin/generate-openrouter.sh "prompt" [model]` — one-shot book generation with OpenRouter
+- `make server-openrouter` / `make generate-openrouter PROMPT="..."` — Makefile wrappers
 
 ### Media storage
 
@@ -1475,3 +1483,82 @@ App.vue
 6. Wire up layout bounding boxes to paged.js
 7. Export (PDF via headless browser)
 ```
+
+---
+
+## Implementation Session 2026-06-02 — Provider/Model Config Simplification
+
+### Decisions
+
+1. **Removed `SLIDETHING_PROVIDER` and `SLIDETHING_MODEL` env var overrides.** Config loads purely from `config/agents.json`. No env vars influence which provider or model an agent uses. Previously `override_from_env/1` in `Slidething.Agent.Config` would bulldoze all agents with a single global override — this was removed.
+
+2. **`agents.json` is the single config source.** Per-agent `provider` and `model` fields. Different agents can use different providers/models. Edit the file to switch.
+
+3. **Runtime switching via `Config.set/2`.** Per-agent overrides at runtime (IEx, mix task). No env var contamination:
+   ```elixir
+   Slidething.Agent.Config.set(:content, provider: "openrouter", model: "google/gemma-4-31b-it:free")
+   Slidething.Agent.Config.reset()  # back to agents.json
+   ```
+
+4. **`mix generate --provider` uses `Config.set/2`.** The `--provider` and new `--model` flags apply to all agents at runtime. Provider defaults: `openrouter` → `google/gemma-4-31b-it:free`, `gemini` → `gemini-2.5-flash`.
+
+5. **Launch scripts for OpenRouter.**
+   - `bin/run-openrouter.sh` — starts dev server, sources `.env` for `OPENROUTER_API_KEY`
+   - `bin/generate-openrouter.sh "prompt" [model]` — one-shot generation
+   - `make server-openrouter` / `make generate-openrouter PROMPT="..."` — Makefile targets
+
+### API keys
+
+Keys (`GOOGLE_API_KEY`, `OPENROUTER_API_KEY`) still come from env vars. The `config/agents.json` stores only the env var name in `api_key_env`, not the key itself. The provider modules call `System.get_env/1` directly at request time.
+
+### Future: text vs. image model separation
+
+Per-agent config in `agents.json` already supports this — set the `media` agent to a different provider/model than `content`. No code changes needed. The `generate_image` tool remains a stub; real image generation will use the media agent's configured model when implemented.
+
+---
+
+## Implementation Session 2026-06-03 — Unified Prompt + Transcript Persistence
+
+### Problem
+
+Two related but separate things were being conflated:
+- "Prompt history" — what the user typed, the target, when. Stored in `prompts` + `prompt_targets` but with dead columns (`context`, `result_summary` never filled).
+- "Agent transcripts" — the conversation between system, LLM, and tool registry. Lived only in `Slidething.Agent.GenServer` state and died when the orchestrator exited.
+
+The `run_id` linking the two was an in-memory string with no persistent record.
+
+### Decisions
+
+1. **One user submission = one `prompts` row = one orchestrator run.** The `prompt.id` IS the canonical `run_id`. Recording moved out of the controller into `Agent.API.start_run`, so programmatic/MCP callers don't need to remember it.
+
+2. **Inline target on `prompts`** — `target_type`, `target_id` columns. `prompt_targets` join table dropped. UI only sends one target; the join was overkill for MVP.
+
+3. **Two new tables for transcripts:**
+   - `agent_runs` — one row per agent invocation under a prompt. Columns: `id`, `prompt_id`, `agent_type`, `scope_type`, `scope_id`, `provider`, `model`, `status`, `final_result`, `failure_reason`, `started_at`, `completed_at`.
+   - `agent_messages` — append-only conversation log. Columns: `id`, `agent_run_id`, `iteration`, `role`, `content`, `tool_calls` (JSON), `tool_results` (JSON), `created_at`.
+
+4. **No FK enforcement at the SQL level** (SQLite default). Lets tests that bypass `Agent.API` still create agent transcripts without inserting a parent prompts row.
+
+5. **UUIDs for `prompt_id` and `agent_run_id`** via `Ecto.UUID.generate/0`. The old `run_#{:rand.uniform(1_000_000)}` and `prompt_#{:rand.uniform(1_000_000)}` schemes had real collision risk and have been removed.
+
+6. **Transcripts are NOT context for the next prompt.** Critical distinction:
+   - Next-prompt context is built fresh from the deterministic core (current state of the target) plus recent `prompts.user_prompt`/`result_summary` rows on that scope.
+   - Transcripts are audit/debug data — surfaced in the UI history drilldown, not replayed into a new LLM call.
+
+7. **Versioning of prompt templates is deferred.** No `prompt_template_version` column for now.
+
+### Module map
+
+| Module | Role |
+|---|---|
+| `Slidething.Prompt` | `start_run/3`, `complete/2`, `fail/2`, `list/2`. User-facing rows. |
+| `Slidething.Transcript` | `start_agent_run/4`, `append_message(s)/3`, `complete_agent_run/2`, `fail_agent_run/2`, `list_for_prompt/1`. Per-agent rows. |
+| `Slidething.Agent.API` | Owns `prompt_id`/`run_id` generation; writes prompts row on `start_run` if `book_id` is given. |
+| `Slidething.Agent.Orchestrator` | Calls `Prompt.complete/2` and `Prompt.fail/2` on terminal transitions. |
+| `Slidething.Agent.GenServer` | Calls `Transcript.start_agent_run` on `:start_task`, appends messages after each LLM iteration, marks done/failed at completion. |
+
+### Notes
+
+- `prompts.context` and `prompts.run_id` columns retained for SQLite schema compatibility (SQLite can't easily drop columns). `run_id` is set equal to `id`; `context` is no longer written.
+- `agent_type` on `prompts` is now always `"user"` — the field is preserved for back-compat but is no longer load-bearing.
+- `Slidething.Book.delete/1` now cascades through `agent_messages → agent_runs → prompts → book_formats → books` and no longer touches `prompt_targets`.

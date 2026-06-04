@@ -17,6 +17,7 @@ defmodule Slidething.Agent.GenServer do
 
   defstruct [
     :run_id,
+    :agent_run_id,
     :agent_type,
     :scope,
     :orchestrator_pid,
@@ -31,6 +32,7 @@ defmodule Slidething.Agent.GenServer do
 
   @type t :: %__MODULE__{
           run_id: String.t(),
+          agent_run_id: String.t() | nil,
           agent_type: atom(),
           scope: term(),
           orchestrator_pid: pid(),
@@ -72,6 +74,7 @@ defmodule Slidething.Agent.GenServer do
   def init(opts) do
     state = %__MODULE__{
       run_id: Keyword.fetch!(opts, :run_id),
+      agent_run_id: nil,
       agent_type: Keyword.fetch!(opts, :agent_type),
       scope: Keyword.get(opts, :scope),
       orchestrator_pid: Keyword.fetch!(opts, :orchestrator_pid),
@@ -84,7 +87,7 @@ defmodule Slidething.Agent.GenServer do
       result: nil
     }
 
-    broadcast_event(state, :started, %{agent_type: state.agent_type, scope: state.scope})
+    broadcast_event(state, :started, %{agent_type: state.agent_type, scope: scope_to_json(state.scope)})
     {:ok, state}
   end
 
@@ -104,9 +107,20 @@ defmodule Slidething.Agent.GenServer do
       content: task_description
     }
 
+    agent_run_id =
+      Slidething.Transcript.start_agent_run(
+        state.run_id,
+        state.agent_type,
+        state.scope,
+        state.agent_spec
+      )
+
+    Slidething.Transcript.append_messages(agent_run_id, 0, [system_message, user_message])
+
     new_state = %{
       state
-      | messages: [system_message, user_message],
+      | agent_run_id: agent_run_id,
+        messages: [system_message, user_message],
         status: :thinking,
         iteration: 0
     }
@@ -148,20 +162,23 @@ defmodule Slidething.Agent.GenServer do
     Process.demonitor(ref, [:flush])
 
     Logger.debug("[#{state.agent_type}] LLM response received")
-    broadcast_event(state, :llm_response, %{result: result})
 
     case result do
       {:tool_requests, calls} ->
+        broadcast_event(state, :llm_response, %{result_type: :tool_requests, tool_count: length(calls)})
         handle_tool_requests(state, calls)
 
       {:patch_proposal, patch} ->
+        broadcast_event(state, :llm_response, %{result_type: :patch_proposal})
         complete_agent(state, {:patch, patch})
 
       {:final_response, message} ->
+        broadcast_event(state, :llm_response, %{result_type: :final_response, message: message})
         complete_agent(state, {:final, message})
 
       {:error, reason} ->
         Logger.error("[#{state.agent_type}] LLM call failed: #{inspect(reason)}")
+        broadcast_event(state, :llm_response, %{result_type: :error, reason: inspect(reason)})
         fail_agent(state, {:llm_error, reason})
     end
   end
@@ -178,27 +195,42 @@ defmodule Slidething.Agent.GenServer do
     Logger.info("[#{state.agent_type}] Executing #{length(calls)} tool calls")
 
     results =
-      Enum.map(calls, fn %ToolCall{tool: tool, args: args} ->
+      Enum.map(calls, fn %ToolCall{call_id: call_id, tool: tool, args: args} ->
         Logger.debug("[#{state.agent_type}] Tool call: #{tool}(#{inspect(args)})")
-        Slidething.Tool.Registry.execute(tool, args)
+        %{Slidething.Tool.Registry.execute(tool, args) | call_id: call_id}
       end)
+
+    assistant_message = %Message{
+      role: :assistant,
+      content: "",
+      tool_calls: calls
+    }
 
     tool_message = %Message{
       role: :tool,
       tool_results: results
     }
 
+    next_iteration = state.iteration + 1
+
+    if state.agent_run_id do
+      Slidething.Transcript.append_messages(state.agent_run_id, next_iteration, [
+        assistant_message,
+        tool_message
+      ])
+    end
+
     new_state = %{
       state
-      | messages: state.messages ++ [tool_message],
+      | messages: state.messages ++ [assistant_message, tool_message],
         status: :executing_tools,
-        iteration: state.iteration + 1,
+        iteration: next_iteration,
         pending_task: nil
     }
 
     broadcast_event(new_state, :tools_executed, %{
       tool_count: length(calls),
-      results: results
+      results: Enum.map(results, &tool_result_to_map/1)
     })
 
     send(self(), :do_llm_call)
@@ -208,8 +240,23 @@ defmodule Slidething.Agent.GenServer do
   defp complete_agent(state, result) do
     Logger.info("[#{state.agent_type}] Completed with result: #{inspect(result)}")
 
+    if state.agent_run_id do
+      case result do
+        {:final, msg} ->
+          Slidething.Transcript.append_message(state.agent_run_id, state.iteration + 1, %Message{
+            role: :assistant,
+            content: msg
+          })
+
+        _ ->
+          :ok
+      end
+
+      Slidething.Transcript.complete_agent_run(state.agent_run_id, result)
+    end
+
     new_state = %{state | status: :done, result: result, pending_task: nil}
-    broadcast_event(new_state, :completed, %{result: result})
+    broadcast_event(new_state, :completed, %{result: result_to_map(result)})
 
     send(state.orchestrator_pid, {:agent_done, self(), result})
     {:noreply, new_state}
@@ -218,18 +265,35 @@ defmodule Slidething.Agent.GenServer do
   defp fail_agent(state, reason) do
     Logger.error("[#{state.agent_type}] Failed: #{inspect(reason)}")
 
+    if state.agent_run_id do
+      Slidething.Transcript.fail_agent_run(state.agent_run_id, reason)
+    end
+
     new_state = %{state | status: :failed, pending_task: nil}
-    broadcast_event(new_state, :failed, %{reason: reason})
+    broadcast_event(new_state, :failed, %{reason: inspect(reason)})
 
     send(state.orchestrator_pid, {:agent_failed, self(), reason})
     {:noreply, new_state}
   end
 
-  defp broadcast_event(state, event_type, data) do
+  defp result_to_map({:final, message}), do: %{type: "final", message: message}
+  defp result_to_map({:patch, _patch}), do: %{type: "patch"}
+  defp result_to_map(other), do: %{type: "unknown", value: inspect(other)}
+
+  defp tool_result_to_map(%Slidething.Agent.ToolResult{} = r) do
+    %{
+      call_id: r.call_id,
+      tool: r.tool,
+      success: r.success,
+      error: r.error
+    }
+  end
+
+defp broadcast_event(state, event_type, data) do
     event = %{
       run_id: state.run_id,
       agent_type: state.agent_type,
-      scope: state.scope,
+      scope: scope_to_json(state.scope),
       event: event_type,
       data: data,
       timestamp: DateTime.utc_now()
@@ -237,8 +301,16 @@ defmodule Slidething.Agent.GenServer do
 
     Phoenix.PubSub.broadcast(
       Slidething.PubSub,
-      "agent_events:#{state.run_id}",
+      "events:#{state.run_id}",
       {:agent_event, event}
-)
+    )
   end
+
+  def scope_to_json({:page, page_id}), do: %{type: "page", page_id: page_id}
+  def scope_to_json({:elements, element_ids}), do: %{type: "elements", element_ids: element_ids}
+  def scope_to_json({:element, element_id}), do: %{type: "element", element_id: element_id}
+  def scope_to_json({:pages, page_ids}), do: %{type: "pages", page_ids: page_ids}
+  def scope_to_json(nil), do: nil
+  def scope_to_json(other) when is_atom(other), do: Atom.to_string(other)
+  def scope_to_json(other), do: other
 end

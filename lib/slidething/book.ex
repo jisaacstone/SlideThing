@@ -129,6 +129,50 @@ defmodule Slidething.Book do
     end
   end
 
+  @doc """
+  Fetch a single format by ID. Returns the format map or nil.
+  """
+  def get_format(format_id) do
+    result = query("SELECT id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm FROM formats WHERE id = ?", [format_id])
+
+    case result.rows do
+      [[id, name, unit, width, height, dpi, b_mm, s_mm]] ->
+        %{id: id, name: name, unit: unit, width: width, height: height, dpi: dpi, bleed_mm: b_mm, safe_margin_mm: s_mm}
+      _ ->
+        nil
+    end
+  end
+
+  @doc """
+  Delete a book and all its pages, elements, and prompts.
+  """
+  def delete(book_id) do
+    pages = query("SELECT id FROM pages WHERE book_id = ?", [book_id])
+    for [pid] <- pages.rows do
+      query("DELETE FROM element_versions WHERE element_id IN (SELECT id FROM elements WHERE page_id = ?)", [pid])
+      query("DELETE FROM elements WHERE page_id = ?", [pid])
+      query("DELETE FROM layout_versions WHERE page_id = ?", [pid])
+    end
+    query("DELETE FROM pages WHERE book_id = ?", [book_id])
+    query("DELETE FROM agent_messages WHERE agent_run_id IN (SELECT id FROM agent_runs WHERE prompt_id IN (SELECT id FROM prompts WHERE book_id = ?))", [book_id])
+    query("DELETE FROM agent_runs WHERE prompt_id IN (SELECT id FROM prompts WHERE book_id = ?)", [book_id])
+    query("DELETE FROM prompts WHERE book_id = ?", [book_id])
+    query("DELETE FROM book_formats WHERE book_id = ?", [book_id])
+    query("DELETE FROM books WHERE id = ?", [book_id])
+    :ok
+  end
+
+  @doc """
+  Delete a single page and all its elements.
+  """
+  def delete_page(page_id) do
+    query("DELETE FROM element_versions WHERE element_id IN (SELECT id FROM elements WHERE page_id = ?)", [page_id])
+    query("DELETE FROM elements WHERE page_id = ?", [page_id])
+    query("DELETE FROM layout_versions WHERE page_id = ?", [page_id])
+    query("DELETE FROM pages WHERE id = ?", [page_id])
+    :ok
+  end
+
   defp generate_id(prefix), do: "#{prefix}_#{Ecto.UUID.generate()}"
   defp now_iso, do: DateTime.utc_now() |> DateTime.to_iso8601()
   defp parse_json(nil), do: %{}

@@ -35,17 +35,32 @@ Streams agent progress in real time with icons (phases, tool calls, LLM iteratio
 
 ## With a real provider
 
+Provider/model config comes from `config/agents.json` (default: mock). Alternate configs available:
+
+| Config file | Provider | Text models | Cost |
+|---|---|---|---|
+| `agents.json` | mock | mock-model | free, no keys |
+| `agents-openrouter-free.json` | OpenRouter | llama-3.2-3b, gemma-4-31b | free tier |
+| `agents-openrouter.json` | OpenRouter | gpt-4o-mini | ~$0.15/million tokens |
+
 ```bash
-# Gemini
-GOOGLE_API_KEY=... mix slidething.generate "Create a children's book" --provider gemini
+# Start dev server with OpenRouter cheap config
+SLIDETHING_AGENT_CONFIG=agents-openrouter.json mix phx.server
 
-# OpenRouter
-OPENROUTER_API_KEY=... mix slidething.generate "Create a children's book" --provider openrouter
+# Or use the free-tier config
+SLIDETHING_AGENT_CONFIG=agents-openrouter-free.json mix phx.server
 
-# Or set once and run multiple times
-export SLIDETHING_PROVIDER=openrouter
-mix slidething.generate "Create a book about a fox"
-mix slidething.generate "Refine page 3 layout"
+# One-shot generation (free tier)
+SLIDETHING_AGENT_CONFIG=agents-openrouter-free.json \
+  mix slidething.generate "Create a children's book about a penguin"
+```
+
+## Fast OpenRouter scripts
+
+```bash
+# Requires OPENROUTER_API_KEY in .env
+bin/run-openrouter.sh                           # Dev server → agents-openrouter.json
+bin/generate-openrouter.sh "Create a book..."   # One-shot, agents-openrouter.json
 ```
 
 ## Switching providers at runtime (IEx)
@@ -57,12 +72,19 @@ Slidething.Agent.Config.list_specs()
 # Switch content agent to Gemini
 Slidething.Agent.Config.set(:content, provider: "gemini", model: "gemini-2.5-flash")
 
+# Switch all agents at once
+for agent <- [:planner, :content, :research, :layout, :media] do
+  Slidething.Agent.Config.set(agent, provider: "openrouter", model: "google/gemma-4-31b-it:free")
+end
+
 # Run a generation
 {:ok, run_id} = Slidething.Agent.API.start_run("Create a book...")
 
 # Back to file defaults
 Slidething.Agent.Config.reset()
 ```
+
+Provider/model config lives in `config/agents.json`. No env-var overrides for provider/model — edit the file or use `Config.set/2` at runtime. API keys still come from env vars.
 
 ## REST API
 

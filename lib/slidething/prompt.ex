@@ -1,102 +1,119 @@
 defmodule Slidething.Prompt do
   @moduledoc """
-  Prompt persistence and querying.
+  User-facing prompt persistence. One row per user submission.
 
-  Records user prompts with optional target scoping and
-  provides prompt history for books/pages/elements.
+  The prompt row IS the orchestrator-run record: `prompt.id` is the
+  canonical run_id used everywhere downstream. The `run_id` column on
+  the table is kept equal to `id` for backward compatibility with the
+  existing schema; new code should treat them as the same value.
+
+  The per-agent transcripts (system prompts, LLM messages, tool calls)
+  live in `Slidething.Transcript`, not here.
   """
 
   alias Slidething.Repo
 
   @doc """
-  Record a prompt in the database.
+  Insert a new prompt row at the start of a run. Returns the prompt id.
 
-  Options:
-    - target_type: "page" | "element" (optional)
-    - target_id: page id or element id (optional)
-    - result_summary: agent response summary (optional)
-    - agent_type: which agent processed this (defaults to "user")
+  Target type/id are optional and scope the prompt to a single page or
+  element. Stored inline on the row (no separate join table).
   """
-  def record(run_id, book_id, user_prompt, opts \\ []) do
+  def start_run(book_id, user_prompt, opts \\ []) do
+    id = Ecto.UUID.generate()
     target_type = Keyword.get(opts, :target_type)
     target_id = Keyword.get(opts, :target_id)
-    result_summary = Keyword.get(opts, :result_summary)
-    agent_type = Keyword.get(opts, :agent_type, "user")
+    now = now_iso()
 
-    prompt_id = "prompt_#{:rand.uniform(1_000_000)}"
-    now = DateTime.utc_now() |> DateTime.to_iso8601()
-
-    Repo
-    |> Ecto.Adapters.SQL.query!("""
-    INSERT INTO prompts (id, book_id, run_id, agent_type, user_prompt, context, result_summary, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """,
-      [prompt_id, book_id, run_id, agent_type, user_prompt, Jason.encode!(%{}), result_summary, now])
-
-    if target_type && target_id do
-      Repo
-      |> Ecto.Adapters.SQL.query!("""
-      INSERT INTO prompt_targets (prompt_id, target_type, target_id)
-      VALUES (?, ?, ?)
+    query!(
+      """
+      INSERT INTO prompts
+        (id, book_id, user_prompt, target_type, target_id, status, created_at)
+      VALUES (?, ?, ?, ?, ?, 'running', ?)
       """,
-        [prompt_id, target_type, target_id])
-    end
+      [id, book_id, user_prompt, target_type, target_id, now]
+    )
 
-    {:ok, prompt_id}
+    id
   end
 
   @doc """
-  List prompts for a book, optionally scoped to a target.
+  Mark a prompt completed and write the result summary.
+  Safe no-op if no row matches (e.g. tests that bypass the API).
+  """
+  def complete(prompt_id, summary) when is_binary(prompt_id) do
+    query!(
+      "UPDATE prompts SET status = 'done', result_summary = ?, completed_at = ? WHERE id = ?",
+      [summary, now_iso(), prompt_id]
+    )
 
-  Returns a list of maps with prompt info and targets.
+    :ok
+  end
+
+  @doc """
+  Mark a prompt failed. Safe no-op if no row matches.
+  """
+  def fail(prompt_id, reason) when is_binary(prompt_id) do
+    query!(
+      "UPDATE prompts SET status = 'failed', result_summary = ?, completed_at = ? WHERE id = ?",
+      [inspect(reason), now_iso(), prompt_id]
+    )
+
+    :ok
+  end
+
+  @doc """
+  List prompts for a book, optionally scoped to a single target id.
+  Returns the shape expected by the UI.
   """
   def list(book_id, target_id \\ nil) do
-    {base_query, base_args} =
+    {where, args} =
       if target_id do
-        {"INNER JOIN prompt_targets pt ON pt.prompt_id = p.id WHERE p.book_id = ? AND pt.target_id = ?",
-         [book_id, target_id]}
+        {"WHERE book_id = ? AND target_id = ?", [book_id, target_id]}
       else
-        {"WHERE p.book_id = ?", [book_id]}
+        {"WHERE book_id = ?", [book_id]}
       end
 
     result =
-      Repo
-      |> Ecto.Adapters.SQL.query!("""
-      SELECT p.id, p.run_id, p.agent_type, p.user_prompt, p.result_summary, p.created_at
-      FROM prompts p
-      #{base_query}
-      ORDER BY p.created_at DESC
-      LIMIT 50
-      """,
-        base_args)
+      query!(
+        """
+        SELECT id, user_prompt, result_summary,
+               target_type, target_id, status, created_at, completed_at
+        FROM prompts
+        #{where}
+        ORDER BY created_at DESC
+        LIMIT 50
+        """,
+        args
+      )
 
     rows =
-      Enum.map(result.rows, fn [id, run_id, agent_type, user_prompt, result_summary, created_at] ->
-        targets = fetch_targets(id)
+      Enum.map(result.rows, fn [id, user_prompt, result_summary,
+                                ttype, tid, status, created, completed] ->
+        targets =
+          case {ttype, tid} do
+            {nil, _} -> []
+            {_, nil} -> []
+            {t, i} -> [%{target_type: t, target_id: i}]
+          end
 
         %{
           id: id,
-          run_id: run_id,
-          agent_type: agent_type,
+          run_id: id,
+          agent_type: "user",
           user_prompt: user_prompt,
           result_summary: result_summary,
           targets: targets,
-          created_at: created_at
+          status: status,
+          created_at: created,
+          completed_at: completed
         }
       end)
 
     {:ok, rows}
   end
 
-  defp fetch_targets(prompt_id) do
-    result =
-      Repo
-      |> Ecto.Adapters.SQL.query!(
-        "SELECT target_type, target_id FROM prompt_targets WHERE prompt_id = ?",
-        [prompt_id])
+  defp now_iso, do: DateTime.utc_now() |> DateTime.to_iso8601()
 
-    Enum.map(result.rows, fn [target_type, target_id] ->
-      %{target_type: target_type, target_id: target_id}
-    end)
-  end
+  defp query!(sql, args), do: Ecto.Adapters.SQL.query!(Repo, sql, args, log: :debug)
 end
