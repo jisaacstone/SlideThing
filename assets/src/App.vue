@@ -18,6 +18,8 @@
     <PageView
       :page="currentPage"
       @select-element="selectElement"
+      @move-element="handleMoveElement"
+      @update-content="handleUpdateContent"
     />
 
     <PromptPanel
@@ -47,6 +49,8 @@ import {
   deleteBook,
   deletePage,
   createPage,
+  moveElement,
+  updateElementContent,
 } from "./api";
 import OutlineSidebar from "./components/OutlineSidebar.vue";
 import PageView from "./components/PageView.vue";
@@ -194,6 +198,19 @@ async function handleDeleteBook() {
 async function loadPrompts() {
   if (!currentBookId.value) return;
   prompts.value = await fetchPrompts(currentBookId.value, targetId.value || undefined);
+}
+
+async function handleUpdateContent(elementId: string, content: string) {
+  await updateElementContent(elementId, content);
+  if (selectedPageId.value) selectPage(selectedPageId.value);
+}
+
+async function handleMoveElement(elementId: string, x: number, y: number) {
+  if (!currentPage.value) return;
+  const layout = currentPage.value.layouts[0];
+  if (!layout) return;
+  await moveElement(currentPage.value.id, layout.format_id, elementId, x, y);
+  if (selectedPageId.value) selectPage(selectedPageId.value);
 }
 
 async function submitPrompt(text: string, ttype: string, tid: string) {

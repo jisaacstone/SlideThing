@@ -13,6 +13,16 @@ defmodule SlidethingWeb.LayoutController do
     end
   end
 
+  def move_element(conn, %{"page_id" => page_id, "format_id" => format_id, "element_id" => element_id, "x" => x, "y" => y}) do
+    case Layout.move_element(page_id, format_id, element_id, x * 1.0, y * 1.0) do
+      {:ok, layout} ->
+        json(conn, layout)
+
+      {:error, :not_found} ->
+        conn |> put_status(404) |> json(%{error: "layout not found"})
+    end
+  end
+
   def list(conn, %{"page_id" => page_id}) do
     {:ok, layouts} = Layout.get_all(page_id)
     json(conn, layouts)

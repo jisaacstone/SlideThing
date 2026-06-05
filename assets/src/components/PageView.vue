@@ -11,24 +11,46 @@
         overflow the page bounds
       </div>
 
-      <div class="page-canvas" :class="{ 'has-overflow': overflowingElements.length > 0 }" :style="canvasStyle">
+      <div class="page-canvas" :class="{ 'has-overflow': overflowingElements.length > 0 }" :style="canvasStyle" ref="canvasRef">
         <div
           v-for="el in page.elements"
           :key="el.id"
           class="page-element"
-          :class="['el-' + el.element_type, { selectable: true, 'el-overflows': isOverflowing(el.id) }]"
+          :class="[
+            'el-' + el.element_type,
+            {
+              selectable: true,
+              'el-overflows': isOverflowing(el.id),
+              'el-dragging': dragState?.elementId === el.id,
+              'el-editing': editState?.elementId === el.id,
+            },
+          ]"
           :style="elementStyle(el)"
-          @click="$emit('select-element', el.id)"
+          @pointerdown="startDrag($event, el)"
+          @pointermove="onDrag($event)"
+          @pointerup="endDrag($event)"
+          @lostpointercapture="cancelDrag()"
+          @dblclick="startEdit($event, el)"
         >
           <div v-if="el.element_type === 'image' && el.latest_version?.asset_path" class="el-image-wrapper">
             <img :src="'/api/assets/' + el.latest_version.asset_path" alt="" />
           </div>
           <div v-else class="el-text">
-            <template v-if="el.element_type === 'title'">
-              <h2>{{ el.latest_version?.content || "" }}</h2>
+            <template v-if="editState?.elementId === el.id">
+              <textarea
+                :id="`edit-${el.id}`"
+                class="el-edit-textarea"
+                v-model="editState.content"
+                @blur="saveEdit(el)"
+                @keydown.esc.prevent="cancelEdit()"
+                @keydown.ctrl.enter.prevent="saveEdit(el)"
+                @pointerdown.stop
+                @click.stop
+              />
             </template>
             <template v-else>
-              {{ el.latest_version?.content || "" }}
+              <h2 v-if="el.element_type === 'title'">{{ el.latest_version?.content || "" }}</h2>
+              <span v-else>{{ el.latest_version?.content || "" }}</span>
             </template>
           </div>
         </div>
@@ -38,23 +60,46 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, nextTick } from "vue";
 import type { Page, ElementItem } from "../api";
 
 const props = defineProps<{
   page: Page | null;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   "select-element": [elementId: string];
+  "move-element": [elementId: string, x: number, y: number];
+  "update-content": [elementId: string, content: string];
 }>();
+
+const canvasRef = ref<HTMLElement | null>(null);
+
+interface DragState {
+  elementId: string;
+  pointerId: number;
+  startFracX: number;
+  startFracY: number;
+  startElemX: number;
+  startElemY: number;
+  currentX: number;
+  currentY: number;
+  hasMoved: boolean;
+}
+
+interface EditState {
+  elementId: string;
+  content: string;
+  originalContent: string;
+}
+
+const dragState = ref<DragState | null>(null);
+const editState = ref<EditState | null>(null);
 
 // Use the most recent layout (first in the array, sorted newest-first by the API)
 const primaryLayout = computed(() => props.page?.layouts?.[0] ?? null);
 
 const format = computed(() => primaryLayout.value?.format ?? null);
-
-const hasLayout = computed(() => primaryLayout.value !== null);
 
 // Map element_id -> bounding box fractions
 const bboxByElement = computed(() => {
@@ -83,15 +128,119 @@ const canvasStyle = computed(() => {
 function elementStyle(el: ElementItem): Record<string, string> {
   const bb = bboxByElement.value[el.id];
   if (!bb) return {};
+
+  let x = bb.x;
+  let y = bb.y;
+
+  if (dragState.value?.elementId === el.id) {
+    x = dragState.value.currentX;
+    y = dragState.value.currentY;
+  }
+
   return {
     position: "absolute",
-    left: `${bb.x * 100}%`,
-    top: `${bb.y * 100}%`,
+    left: `${x * 100}%`,
+    top: `${y * 100}%`,
     width: `${bb.width * 100}%`,
     height: `${bb.height * 100}%`,
     overflow: "hidden",
     margin: "0",
   };
+}
+
+// --- Drag ---
+
+function startDrag(event: PointerEvent, el: ElementItem) {
+  if (editState.value?.elementId === el.id) return;
+
+  const bb = bboxByElement.value[el.id];
+  if (!bb || !canvasRef.value) return;
+
+  event.preventDefault();
+  (event.currentTarget as Element).setPointerCapture(event.pointerId);
+
+  const rect = canvasRef.value.getBoundingClientRect();
+
+  dragState.value = {
+    elementId: el.id,
+    pointerId: event.pointerId,
+    startFracX: (event.clientX - rect.left) / rect.width,
+    startFracY: (event.clientY - rect.top) / rect.height,
+    startElemX: bb.x,
+    startElemY: bb.y,
+    currentX: bb.x,
+    currentY: bb.y,
+    hasMoved: false,
+  };
+}
+
+function onDrag(event: PointerEvent) {
+  if (!dragState.value || !canvasRef.value) return;
+
+  const rect = canvasRef.value.getBoundingClientRect();
+  const fracX = (event.clientX - rect.left) / rect.width;
+  const fracY = (event.clientY - rect.top) / rect.height;
+
+  const dx = fracX - dragState.value.startFracX;
+  const dy = fracY - dragState.value.startFracY;
+
+  if (Math.abs(dx) > 0.005 || Math.abs(dy) > 0.005) {
+    dragState.value.hasMoved = true;
+  }
+
+  const bb = bboxByElement.value[dragState.value.elementId];
+  if (!bb) return;
+
+  dragState.value.currentX = Math.max(0, Math.min(1 - bb.width, dragState.value.startElemX + dx));
+  dragState.value.currentY = Math.max(0, Math.min(1 - bb.height, dragState.value.startElemY + dy));
+}
+
+function endDrag(event: PointerEvent) {
+  if (!dragState.value || dragState.value.pointerId !== event.pointerId) return;
+
+  const { elementId, currentX, currentY, hasMoved } = dragState.value;
+  dragState.value = null;
+
+  if (hasMoved) {
+    emit("move-element", elementId, currentX, currentY);
+  } else {
+    emit("select-element", elementId);
+  }
+}
+
+function cancelDrag() {
+  dragState.value = null;
+}
+
+// --- Inline edit ---
+
+function startEdit(event: MouseEvent, el: ElementItem) {
+  if (el.element_type === "image") return;
+
+  event.stopPropagation();
+  const content = el.latest_version?.content ?? "";
+  editState.value = { elementId: el.id, content, originalContent: content };
+
+  nextTick(() => {
+    const ta = document.getElementById(`edit-${el.id}`) as HTMLTextAreaElement | null;
+    ta?.focus();
+    ta?.select();
+  });
+}
+
+function saveEdit(el: ElementItem) {
+  if (!editState.value || editState.value.elementId !== el.id) return;
+
+  const { elementId, content, originalContent } = editState.value;
+  editState.value = null;
+
+  if (content !== originalContent) {
+    emit("update-content", elementId, content);
+  }
+}
+
+function cancelEdit() {
+  editState.value = null;
 }
 </script>
 
@@ -169,14 +318,29 @@ function elementStyle(el: ElementItem): Record<string, string> {
 }
 
 .page-element.selectable {
-  cursor: pointer;
+  cursor: grab;
   padding: 8px;
   border: 2px solid transparent;
   transition: border-color 0.15s;
   box-sizing: border-box;
+  user-select: none;
 }
 
 .page-element.selectable:hover {
+  border-color: var(--primary-light);
+  background: rgba(74, 108, 247, 0.03);
+}
+
+.page-element.el-dragging {
+  cursor: grabbing;
+  border-color: var(--primary-light);
+  box-shadow: 0 4px 16px rgba(74, 108, 247, 0.18);
+  z-index: 10;
+  opacity: 0.92;
+}
+
+.page-element.el-editing {
+  cursor: default;
   border-color: var(--primary-light);
   background: rgba(74, 108, 247, 0.03);
 }
@@ -198,6 +362,24 @@ function elementStyle(el: ElementItem): Record<string, string> {
   line-height: 1.7;
   color: var(--text);
   overflow: hidden;
+  width: 100%;
+  height: 100%;
+}
+
+.el-edit-textarea {
+  width: 100%;
+  height: 100%;
+  min-height: 60px;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  line-height: inherit;
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
 }
 
 .el-image-wrapper {

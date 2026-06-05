@@ -212,3 +212,30 @@ export async function createPage(bookId: string): Promise<{ id: string; position
   if (!res.ok) throw new Error("create page failed");
   return res.json();
 }
+
+export async function updateElementContent(
+  elementId: string,
+  content: string
+): Promise<void> {
+  const res = await fetch(`/api/elements/${elementId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error("update element content failed");
+}
+
+export async function moveElement(
+  pageId: string,
+  formatId: string,
+  elementId: string,
+  x: number,
+  y: number
+): Promise<void> {
+  const res = await fetch(`/api/pages/${pageId}/layouts`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ format_id: formatId, element_id: elementId, x, y }),
+  });
+  if (!res.ok) throw new Error("move element failed");
+}

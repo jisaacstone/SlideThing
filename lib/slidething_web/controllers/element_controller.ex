@@ -17,4 +17,14 @@ defmodule SlidethingWeb.ElementController do
     elements = Element.list(page_id)
     json(conn, elements)
   end
+
+  def update_content(conn, %{"element_id" => element_id, "content" => content}) do
+    case Element.update(element_id, content) do
+      {:ok, result} ->
+        json(conn, result)
+
+      {:error, :not_found} ->
+        conn |> put_status(404) |> json(%{error: "element not found"})
+    end
+  end
 end

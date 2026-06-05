@@ -36,10 +36,12 @@ defmodule SlidethingWeb.Router do
     # Elements
     get    "/pages/:page_id/elements", ElementController, :list
     get    "/elements/:element_id", ElementController, :show
+    patch  "/elements/:element_id", ElementController, :update_content
 
     # Layouts
     get    "/pages/:page_id/layouts", LayoutController, :list
     get    "/pages/:page_id/layouts/:format_id", LayoutController, :show
+    patch  "/pages/:page_id/layouts", LayoutController, :move_element
 
     # Formats
     get    "/books/:book_id/formats", FormatController, :list

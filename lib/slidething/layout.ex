@@ -143,6 +143,29 @@ defmodule Slidething.Layout do
     end
   end
 
+  @doc """
+  Move a single element within the latest layout version by creating a new version.
+  Returns {:ok, %{id, version}} or {:error, :not_found}.
+  """
+  def move_element(page_id, format_id, element_id, x, y) do
+    case get_latest(page_id, format_id) do
+      {:error, :not_found} ->
+        {:error, :not_found}
+
+      {:ok, latest} ->
+        updated =
+          Enum.map(latest.element_layouts, fn el ->
+            if el["element_id"] == element_id do
+              Map.merge(el, %{"x" => x, "y" => y})
+            else
+              el
+            end
+          end)
+
+        create(page_id, format_id, updated)
+    end
+  end
+
   def get_latest(page_id, format_id) do
     result =
       query(
