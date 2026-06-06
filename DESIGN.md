@@ -1,272 +1,272 @@
-Basic flow: [INPUTS] -> [INTERNAL REPRESENTATION] -> DECK
+## Internal Representation
 
-Internal representation:
+```
+BOOK (root)
+├── Book metadata (title, theme, target_audience, style)
+├── Format associations (web, print, etc.)
+└── PAGES (ordered)
+    └── PAGE (position-indexed)
+        ├── Page metadata (description, status)
+        └── ELEMENTS (ordered)
+            └── ELEMENT (text, title, image, caption)
+                └── ELEMENT_VERSIONS (append-only)
+                    ├── content (for text/title/caption)
+                    ├── asset_path (for images)
+                    ├── prompt (user intent)
+                    └── metadata (style, content-type)
 
-DECK:
- DECK-METADATA
- SLIDES
+LAYOUT_VERSIONS (per page, per format)
+├── Format geometry (width, height, DPI, margins, bleed)
+├── Element layouts (bounding boxes + styling for each element)
+└── Validation status
+```
 
-SLIDES:
- SLIDE + SLIDES
+## Workflow Overview
 
-SLIDE:
- SLIDE-METADATA
- COMPONENTS
+**One user prompt** → creates one `prompts` row (becomes `run_id`) → starts Orchestrator GenServer → phases execute sequentially → commits versions → broadcasts websocket diffs.
 
-COMPONENTS:
- COMPONENT + COMPONENTS
+**Phases:**
+1. **Planner** — Parses user intent, creates book structure, decides page count
+2. **Content** — Writes text, creates elements per page (parallel per page)
+3. **Layout** — Places elements on page (parallel per page, per format)
+4. **Media** — Generates/refines images (parallel per element, async)
+5. **Validation** — Deterministic + LLM checks (future)
 
-COMPONENT:
- COMPONENT-METADATA
- COMPONENT-VALUE
-
-COMPONENT-VALUE
- TEXT
- IMAGE
-
----
-
-The basic idea is that the internal representation can be generated or manually edited
-
-There are three levels of work: DECK, SLIDE, COMPONENT.
-At each level we have LOCKING and VERSIONING. LOCKING will preserve the value when re-generating the INTERNAL-REPRESENTATION from INPUTS.
-
-INPUT -> REPRESENTATION flow can be run at any level. A full deck can be generated from an input. A single image can also be generated.
-
-Examples:
-
-I have a product spec (pdf) and some screenshots (png). I upload these to the interface, and write a prompt: "Generate a 3-4 slide presentation to present at the all hands to hype the new product launch".
-
-The Inputs will become part of the deck metadata. The will also be passed to the internals to create the slides and components. The UI will show the generated slides.
-
-I can then, for example, LOCK the first slide, and re-prompt: "The bullets should be shorter. Focus on user stories not technical implementation".
-
-The first slide will remain the same, and the other slides will be re-generated. I can then decide actually I liked better the first image generated for the last slide. I can click on the generated image, and roll back to the previous version. I can also re-prompt for a single slide, or a single image.
-
-So in this example we have some uploaded images. These will be default be included as-is. But I could add a prompt for a single image, eg "add a green roof to the building" and it would take the source image and the prompt, and generate a new image.
-
-Technical Challenges:
-Templating - most slides follow a simple template (Title only, Title and bullets, chart with short description, etc). Intelligently picking the correct template is important.
-This can be rigid (model is given discreet choices) or dynamic (model is given some tooling and it can generate templates as-needed). We can also have some pre-defined user templates to create very rigid structure.
-
-Which comes first: template or content? It makes most sense for the model first to generate a logical flow of content, and then the actual components, then the templates and slides, and finally run a formatting step.
-
-Formatting: The model will need to intelligently decide if it should move things around, resize things, or edit the content. For text it could resize, change flow, reposition or change content. For Images it can resize, crop, reposition or regenerate. The agent will need to both identify problems and choose the correct solution. My experience is that agents are actually pretty bad at this. The UI should also allow for manual tweaking.
-
-Theme/Palette - having metadata for an theme and/or palette will be desired - getting the model to actually follow has been a challenge for me in the past.
-
-Questions:
-Web editing of slides is probably a solved problem. Is there software existing we can build on top of?
-What are the functional and other requirements?
-Who are the target users? Initial launch, final market?
-Size of screen - affects image resolution, text size?
+**Locking & Versioning:**
+- Element versions are immutable (append-only)
+- Layout versions are per-page, per-format (multi-format support)
+- One user prompt = one committed version boundary per affected element/layout
+- Intermediate repair attempts stay in transcript logs only
 
 ---
 
-## Example Workflows (OTP Process Model)
+## Example Workflows (Plan-Driven Execution)
 
-Process model: One Run GenServer per user prompt (started via DynamicSupervisor).
-Agents (Orchestrator, Research, Content, Layout, Media) are stateless modules.
-A shared Agent.Loop module runs the multi-turn LLM tool-call loop for any agent config.
+Process model: One Run Orchestrator GenServer per user prompt (started via DynamicSupervisor).
+The Orchestrator is pure code — no LLM. It calls a Planner LLM once to get a structured plan,
+then executes the plan's phases in dependency order, spawning Agent GenServers per scope.
 
-Agent configuration (provider, model, temperature, tools) lives in `config/agents.json` — a single file that maps each agent type to its settings. Provider modules (`Gemini`, `OpenRouter`, `Mock`) implement a common behaviour. API keys come from env vars only. No env-var-based provider switching — edit the file or use `Config.set/2` at runtime.
-Task.Supervisor handles parallel work within phases.
+Agent configuration lives in `config/agents.json`. Planner has no tools — it outputs JSON only.
 
 ### Workflow 1: From-Scratch Book Build
 
 Prompt: "Create a 10-page children's book about a fox who learns to share"
 
 ```
-Run.start(book_id: nil, prompt)
-  → DynamicSupervisor starts Run GenServer
-  → status: :planning
-
-Phase 1 — Research (sequential LLM loop):
-  Agent.Loop.run(:research, context)
-    → LLM requests tools: update_book_brief(theme, audience, outline)
-    → Tool.Registry executes, returns result
-    → LLM returns: final_response (book brief + page outline)
-
-Phase 2 — Content (parallel per page):
-  Task.Supervisor spawns 10 tasks:
-    Each: Agent.Loop.run(:content, page_context)
-      → LLM requests: create_element(text), create_element(title)
-      → Returns: patch_proposal per page
-  Run GenServer collects patches, applies via Element API
-
-Phase 3 — Media (parallel, async):
-  For pages needing images:
-    Agent.Loop.run(:media, page_context)
-      → generate_image (slow external call)
-      → store_asset → returns patch
-  Run GenServer collects, applies
-
-Phase 4 — Layout (parallel per page, after content+media):
-  Task.Supervisor spawns N tasks:
-    Each: Agent.Loop.run(:layout, page_context_with_elements)
-      → Returns: layout_changes patch
-  Run GenServer collects, applies via Layout API
-
-Phase 5 — Validate:
-  Validator.Content + Validator.Layout
-  If issues → :repairing → re-run relevant agents with issues (max 2-3)
-
-Phase 6 — Commit versions, broadcast :completed, GenServer stops
+Orchestrator.start_run(prompt)
+  ↓
+Step 1 — Planning (Orchestrator calls Planner LLM via Task.Supervisor):
+  LLM input:  user prompt + optional existing context
+  LLM output: GeneratedPlan JSON
+    {book: {title, metadata}, pages: [...], phases: [...]}
+  No tool calls. Pure text-to-plan.
+  ↓
+Step 2 — Orchestrator creates book + pages (deterministic, no LLM):
+  Book.create(plan.book_structure) → book_id
+  Book.create_pages(book_id, plan.page_specs) → [page_ids]
+  ↓
+Step 3 — PlanValidator validates phases (cycle check, dep refs)
+  ↓
+Step 4 — PlanExecutor.find_ready_phases(phases, completed={}, conditions={})
+  → Returns phases with empty depends_on: ["generate_content"]
+  ↓
+Phase "generate_content" (scope: per_page, parallel):
+  Spawn 10 ContentAgent GenServers (one per page)
+  Each: LLM loop → create_element, update_element
+  All send {:agent_done} to Orchestrator
+  ↓
+PlanExecutor.find_ready_phases → ["generate_layout"] (content done)
+Phase "generate_layout" (scope: per_page, parallel):
+  Spawn 10 LayoutAgent GenServers
+  Each: LLM loop → propose_layout
+  All send {:agent_done}
+  ↓
+PlanExecutor.find_ready_phases → ["generate_media", "validate_layout"] (both deps met)
+Run in parallel:
+  Phase "generate_media" (scope: per_element):
+    Spawn MediaAgent GenServers per image element
+    Each: generate_image (slow 10-30s) → store_asset
+  Phase "validate_layout" (scope: per_page, validator):
+    Run deterministic checks per page → collect issues
+  ↓
+PlanExecutor.find_ready_phases → ["repair_layout"] if has_layout_issues, else skip
+Phase "repair_layout" (condition: has_layout_issues, max_retries: 2):
+  Spawn LayoutAgent GenServers with validation_issues context
+  Retry up to 2 times
+  ↓
+All phases done → Commit versions → Broadcast :completed → Stop
 ```
 
-Coordination: Run GenServer sequences phases (real dependencies between them).
-Parallelism within phases via Task.Supervisor (pages are independent).
-Subagents do NOT call sub-subagents. Orchestrator sequences everything.
-
-### Workflow 2: Refining — Verbatim Text Update + Re-layout
+### Workflow 2: Refining — Single Page Re-layout
 
 Prompt: "Page 3 text should be: 'The fox sat alone under the old oak tree.'"
+(Scope: page_id + element_id already known)
 
 ```
-Run.start(book_id, prompt, target: {page_id, element_id})
-
-Phase 1 — Orchestrator (1-2 LLM calls):
-  Agent.Loop.run(:orchestrator, scoped_context)
-    → Recognizes: verbatim text update, scoped to one page
-    → Returns RunPlan: [content(page_id), layout(page_id)]
-
-Phase 2 — Content (single page, short loop):
-  Agent.Loop.run(:content, page_3_context)
-    → update_text_element(element_id, verbatim text)
-    → Returns patch
-
-Phase 3 — Layout (single page):
-  Agent.Loop.run(:layout, page_3_updated_context)
-    → Text length changed → new bounding boxes
-    → Returns layout patch
-
-Phase 4 — Validate layout (skip content validation for verbatim user text)
-Phase 5 — Commit, broadcast, stop
+Orchestrator.start_run(prompt, book_id, target: {:page, page_id})
+  ↓
+Planner LLM produces a scoped plan:
+  phases: [
+    {name: "update_content", agent_type: "content", scope: "per_page", depends_on: []},
+    {name: "update_layout",  agent_type: "layout",  scope: "per_page", depends_on: ["update_content"]},
+    {name: "validate_layout", step_type: "validator", scope: "per_page", depends_on: ["update_layout"]}
+  ]
+  pages: [{page_id: "<existing>"}]   ← only the target page
+  ↓
+Orchestrator skips book creation (book_id already exists)
+  ↓
+content → layout → validate → (repair if issues)
+  ↓
+Commit → Broadcast → Stop
 ```
 
-Orchestrator could be bypassed for simple intents (deterministic routing),
-but kept for MVP to handle edge cases uniformly.
+### Workflow 3: Image Restyle
 
-### Workflow 3: Re-rendering — User Provides Image + Prompt
-
-Prompt: "Make this image more whimsical, watercolor style" + uploaded image
+Prompt: "Make this image more whimsical, watercolor style" + element_id
 
 ```
-Run.start(book_id, prompt, target: {element_id})
-
-Phase 1 — Orchestrator:
-  Agent.Loop.run(:orchestrator, scoped_context)
-    → Returns RunPlan: [media(element_id), layout(page_id)]
-
-Phase 2 — Media (single element, slow):
-  Agent.Loop.run(:media, element_context)
-    → LLM refines prompt
-    → generate_image (10-30s external call)
-    → store_asset → new UUID
-    → Returns patch with new asset UUID
-
-Phase 3 — Layout (single page, after media):
-  Agent.Loop.run(:layout, page_context_with_new_image)
-    → Image dimensions may differ → new bounding box
-    → Returns layout patch
-
-Phase 4 — Validate layout (image DPI, bounds, overlap)
-Phase 5 — Commit, broadcast, stop
+Orchestrator.start_run(prompt, book_id, target: {:element, element_id})
+  ↓
+Planner produces plan:
+  phases: [
+    {name: "restyle_image", agent_type: "media",   scope: "per_element"},
+    {name: "update_layout", agent_type: "layout",  scope: "per_page", depends_on: ["restyle_image"]},
+    {name: "validate_layout", step_type: "validator", depends_on: ["update_layout"]}
+  ]
+  ↓
+media → layout → validate → (repair if needed)
+  ↓
+Commit → Broadcast → Stop
 ```
-
-Media is the slow step. Run GenServer blocks on the media Task.
-For MVP this is acceptable. Async media with callback is a future optimization.
 
 ---
 
-## Revised OTP Design (v2) — Stateful Agents, Async-First
+## OTP Architecture — Async-First Agent System
 
-### Principles
+### Design Principles
 
-1. **Never block on IO.** All LLM calls, image generation, and HTTP go through
-   `Task.Supervisor.async_nolink` + `handle_info`. No `Task.await` inside GenServers.
-2. **Stateful agent GenServers.** Each agent instance is a GenServer holding
-   conversation history, iteration count, and status. Registered via Registry.
-3. **Separate planning process.** Planner is its own GenServer, distinct from
-   the Orchestrator that sequences execution.
-4. **Clear agentic/deterministic boundary.** Agentic = LLM-driven GenServers.
-   Deterministic = pure function modules. Tools bridge the two.
+1. **Never block on IO.** All LLM calls, image generation, HTTP via `Task.Supervisor.async_nolink` + `handle_info`.
+2. **Stateful agent GenServers.** Each agent is a GenServer holding LLM conversation history, iteration count, status.
+3. **Orchestrator is pure code.** Calls Planner LLM once, then executes the resulting plan. No LLM decision-making in the orchestrator itself.
+4. **Plans are data.** A `GeneratedPlan` is a validated DAG of phases. Parallelization is implicit from scope + dependency rules.
+5. **Clear agentic/deterministic split.** Agentic = LLM GenServers. Deterministic = pure functions. Tools bridge them.
+6. **Repair loops are first-class.** Validator phases store issues in state. Conditional repair phases re-run agents with error context (max_retries enforced).
 
-### Supervision Tree
+### Supervision Tree (Actual Implementation)
 
 ```
 Slidething.Application
-├── Slidething.Repo
-├── {Phoenix.PubSub, :slidething_pubsub}
-├── {Registry, :unique, :agent_registry}      # {run_id, agent_type, scope} → pid
-├── {Registry, :unique, :run_registry}        # run_id → pid
-├── {DynamicSupervisor, :run_supervisor}      # Per-run supervision trees
-├── {Task.Supervisor, :io_task_supervisor}    # All IO-bound work
-├── Slidething.Agent.Config                   # GenServer: agents.json
-└── SlidethingWeb.Endpoint
+├── SlidethingWeb.Telemetry
+├── Slidething.Repo                                    # SQLite via Ecto
+├── {Phoenix.PubSub, name: Slidething.PubSub}         # Event broadcast
+├── {Registry, keys: :unique, Slidething.AgentRegistry}     # {run_id, agent_type, scope} → agent_pid
+├── {Registry, keys: :unique, Slidething.RunRegistry}       # run_id → orchestrator_pid
+├── {DynamicSupervisor, Slidething.RunSupervisor}     # Spawn per-run trees
+├── {Task.Supervisor, Slidething.IOTaskSupervisor}    # All async IO work
+├── Slidething.Agent.Config                           # GenServer: watches agents.json
+└── SlidethingWeb.Endpoint                            # Phoenix HTTP + WebSocket
 
-Per-run child tree (under :run_supervisor):
+Per-run tree (supervised by Slidething.RunSupervisor, :one_for_all):
 
-Run Supervisor (:one_for_all)
-├── Orchestrator          # GenServer — orchestrates phases, never blocks
-├── Planner            # GenServer — agentic planning (started immediately)
-├── ResearchAgent      # GenServer — dynamic, if plan requires
-├── ContentAgent ×N    # GenServer — dynamic, one per page
-├── LayoutAgent ×N     # GenServer — dynamic, one per page
-├── MediaAgent ×N      # GenServer — dynamic, one per image task
-└── ContentCritic      # GenServer — dynamic, validation phase
+Orchestrator GenServer (via RunRegistry)
+├── Planner GenServer         # LLM: parse intent, create book + pages
+├── ContentAgent GenServer(s) # LLM: write text per page (spawned per page)
+├── LayoutAgent GenServer(s)  # LLM: place elements per page (spawned per page)
+└── MediaAgent GenServer(s)   # LLM: generate images (spawned per element, async)
 ```
+
+**Registry lookups:**
+- Agent by role: `{:via, Registry, {Slidething.AgentRegistry, {run_id, :planner, nil}}}`
+- Orchestrator by run: `{:via, Registry, {Slidething.RunRegistry, run_id}}`
 
 ### Agent GenServer State
 
 ```elixir
-%AgentState{
-  agent_type: :planner | :research | :content | :layout | :media | :content_critic,
+%Slidething.Agent.GenServer{
   run_id: String.t(),
-  scope: String.t() | nil,           # page_id or element_id
+  agent_run_id: String.t() | nil,           # Links to agent_runs table
+  agent_type: :planner | :content | :layout | :media,
+  scope: nil | {:page, page_id},            # Page-scoped agents only
+  orchestrator_pid: pid(),
+  agent_spec: AgentSpec.t(),                # Config from agents.json
   status: :idle | :thinking | :executing_tools | :done | :failed,
-  agent_spec: AgentSpec.t(),
-  messages: [Message.t()],           # LLM conversation history
-  pending_task: Task.t() | nil,      # current async IO task ref
+  messages: [Message.t()],                  # LLM conversation history
+  pending_task: Task.t() | nil,             # Async IO task ref (LLM call)
   iteration: integer(),
   max_iterations: integer(),
   result: term() | nil
 }
 ```
 
-### Async Pattern (all agent GenServers)
+**Agent types in config/agents.json:**
+- `planner` — Parses user intent, creates book structure, decides layout
+- `content` — Writes text elements per page
+- `layout` — Proposes element placement per page per format
+- `media` — Generates/refines images per element
+- `research` — (Configured but not used in MVP execution path)
 
+### Async Pattern in Agent GenServer (Actual)
+
+**Step 1: Cast task from Orchestrator**
 ```elixir
+def handle_cast({:start_task, task_description, context}, state) do
+  system_message = %Message{role: :system, content: state.agent_spec.system_prompt}
+  user_message = %Message{role: :user, content: task_description}
+  agent_run_id = Slidething.Transcript.start_agent_run(state.run_id, state.agent_type, state.scope, state.agent_spec)
+  
+  new_state = %{state | agent_run_id: agent_run_id, messages: [system_message, user_message], status: :thinking}
+  send(self(), :do_llm_call)  # Trigger LLM async
+  {:noreply, new_state}
+end
+```
+
+**Step 2: Spawn async LLM call**
+```elixir
+def handle_info(:do_llm_call, state) when state.iteration >= state.max_iterations do
+  fail_agent(state, :max_iterations_reached)
+end
+
 def handle_info(:do_llm_call, state) do
   task = Task.Supervisor.async_nolink(:io_task_supervisor, fn ->
     LLM.Client.complete_json(state.agent_spec, state.messages)
   end)
-  {:noreply, %{state | status: :thinking, pending_task: task}}
-end
-
-def handle_info({ref, result}, %{pending_task: %{ref: ref}} = state) do
-  Process.demonitor(ref, [:flush])
-  case result do
-    {:tool_requests, calls} ->
-      results = Enum.map(calls, &Tool.Registry.execute/1)
-      new_messages = state.messages ++ [%Message{role: :tool, tool_results: results}]
-      send(self(), :do_llm_call)   # next iteration, non-blocking
-      {:noreply, %{state | messages: new_messages, status: :executing_tools}}
-
-    {:patch_proposal, patch} ->
-       send(state.orchestrator_pid, {:agent_done, self(), patch})
-      {:noreply, %{state | status: :done, result: patch}}
-
-    {:final_response, msg} ->
-       send(state.orchestrator_pid, {:agent_done, self(), msg})
-      {:noreply, %{state | status: :done, result: msg}}
-  end
-end
-
-def handle_info({:DOWN, ref, :process, _pid, reason}, %{pending_task: %{ref: ref}} = state) do
-  {:noreply, %{state | status: :failed, pending_task: nil}}
+  broadcast_event(state, :llm_call_started, %{iteration: state.iteration})
+  {:noreply, %{state | status: :thinking, pending_task: task, iteration: state.iteration + 1}}
 end
 ```
+
+**Step 3: Handle LLM result (tool calls)**
+```elixir
+def handle_info({ref, {:tool_requests, calls}}, %{pending_task: %{ref: ref}} = state) do
+  Process.demonitor(ref, [:flush])
+  
+  results = Enum.map(calls, fn call ->
+    Slidething.Tool.Registry.execute(call.tool, call.args)
+  end)
+  
+  # Append tool results and recurse
+  new_messages = state.messages ++ [%Message{role: :assistant, tool_calls: calls}] ++ 
+                                   [%Message{role: :tool, tool_results: results}]
+  Slidething.Transcript.append_messages(state.agent_run_id, state.iteration, new_messages)
+  
+  send(self(), :do_llm_call)  # Next iteration
+  {:noreply, %{state | messages: new_messages, status: :executing_tools}}
+end
+```
+
+**Step 4: Handle final response**
+```elixir
+def handle_info({ref, {:final_response, msg}}, %{pending_task: %{ref: ref}} = state) do
+  Process.demonitor(ref, [:flush])
+  Slidething.Transcript.append_messages(state.agent_run_id, state.iteration, [%Message{role: :assistant, content: msg}])
+  Slidething.Transcript.complete_agent_run(state.agent_run_id)
+  
+  send(state.orchestrator_pid, {:agent_done, self(), {:final, msg}})
+  {:noreply, %{state | status: :done, result: msg}}
+end
+```
+
+**No blocking.** `Task.await` never used in GenServers. Results flow via `handle_info`.
 
 ### Message Protocol
 
@@ -322,55 +322,103 @@ end
 
 ### Tools by Agent
 
-| Agent | Tools (via Tool.Registry) |
+All tools execute via `Slidething.Tool.Registry.execute/2`. Agents never call external APIs or DB directly.
+
+| Agent | Tools (from agents.json) |
 |---|---|
-| **Planner** | `get_book`, `get_outline`, `get_page_list`, `get_book_brief` |
-| **Research** | `update_book_brief`, `update_page_metadata`, `get_book`, `get_outline`, `web_search` (optional) |
-| **ContentAgent** | `get_page_elements`, `get_element`, `get_history`, `create_element`, `update_text_element`, `assign_element_to_page`, `update_element_metadata` |
-| **MediaAgent** | `generate_image`, `store_asset`, `lookup_asset`, `inspect_image` |
-| **LayoutAgent** | `get_layout`, `get_page_elements`, `get_format`, `propose_layout` |
-| **ContentCritic** | `get_book_brief`, `get_page_elements`, `get_outline` (read-only) |
+| **Planner** | `create_book`, `create_pages`, `get_book`, `get_outline` |
+| **Content** | `get_page_elements`, `get_element`, `create_element`, `update_element` |
+| **Layout** | `get_page_elements`, `get_format`, `get_element`, `propose_layout` |
+| **Media** | `get_element`, `get_format`, `generate_image`, `store_asset` |
+| **Research** | `get_book`, `get_outline`, `update_book_metadata`, `update_page_metadata` |
 
-Deterministic-only operations (called by Orchestrator, not by agents):
-`commit_versions`, `validate_layout`, `apply_patch`
+**Deterministic-only (called by Orchestrator, not agents):**
+`validate_layout`, `commit_versions`
 
-### Orchestrator State Machine (Fully Async)
+### Orchestrator State Machine (Plan-Driven, Async)
 
 ```
-:idle → receive {:start, prompt, book_id} → start Planner → :planning
-:planning → receive {:agent_done, planner, RunPlan} → start agents → :executing
-:executing → receive {:agent_done, ...} from each agent
-           → when phase complete: apply patches deterministically
-           → start next phase agents
-           → phases: research → content → media → layout
-:validating → run Validator.Layout (deterministic)
-            → start ContentCritic GenServer (agentic)
-            → receive results
-:repairing → send {:repair, issues} to relevant agents
-           → receive new patches → re-validate (max 2-3)
-:done → commit versions, broadcast :completed, supervisor stops tree
-:failed → broadcast :failed, supervisor stops tree
+:idle
+  ↓ receive {:start_run, prompt, book_id, target_type, target_id}
+:planning
+  → Task.Supervisor spawns async Planner LLM call
+  ↓ handle_info({ref, {:final_response, plan_json}})
+  → parse plan JSON → GeneratedPlan
+  → PlanValidator.validate_plan!(phases)    # fail fast on bad plan
+  → Book.create + Book.create_pages         # deterministic, no LLM
+  → store page_ids in state
+:executing
+  → schedule_next_phases(state)
+    → PlanExecutor.find_ready_phases(phases, completed, conditions)
+    → for each ready phase:
+        :planner   → Task.Supervisor LLM call, store PlanContext on completion
+        :agent     → spawn N Agent.GenServer per scope, GenServer.cast :start_task
+        :validator → run deterministic checks inline (no GenServer), store issues
+  ↓ handle_info({:agent_done, pid, result})
+    → mark agent done in pending_agents
+    → if all agents for phase done: mark phase done, schedule_next_phases
+  ↓ handle_info({:agent_failed, pid, reason})
+    → if retry_count < max_retries: retry phase
+    → else: transition to :failed
+:done
+  → Prompt.complete(run_id)
+  → broadcast :completed via PubSub
+  → DynamicSupervisor stops run tree
+:failed
+  → Prompt.fail(run_id, reason)
+  → broadcast :failed via PubSub
+  → DynamicSupervisor stops run tree
 ```
 
-Orchestrator NEVER blocks. All transitions are message-driven.
-
-### Communication Pattern (handle_cast vs handle_info)
-
-**Orchestrator → Agent:** Use `GenServer.cast` (async, no reply expected)
+**Key state fields added:**
 ```elixir
-GenServer.cast(agent_pid, {:start_task, task_desc, context})
+:generated_plan        # GeneratedPlan.t()
+:page_ids              # [page_id] created from plan
+:completed_phases      # MapSet of phase names that finished
+:pending_agents        # %{pid => {phase_name, scope}}
+:phase_context         # %{phase_name => PlanContext.t()} — outputs of planner steps
+:validation_issues     # %{phase_name => [issue]} — outputs of validator steps
+:retry_counts          # %{phase_name => integer}
 ```
 
-**Task result → Agent:** Use `handle_info` (Task callbacks are regular messages)
+**No blocking.** All transitions via message callbacks (`handle_info`). LLM calls async via Task.Supervisor.
+
+### Communication Patterns (Actual)
+
+**Orchestrator → Agent:** Via `GenServer.cast` (async, non-blocking)
 ```elixir
-def handle_info({ref, result}, %{pending_task: %{ref: ref}} = state) do
-  # process LLM result
+GenServer.cast(agent_pid, {:start_task, task_description, context})
+```
+
+**Task.Supervisor result → Agent:** Via `handle_info` (LLM call result)
+```elixir
+def handle_info({ref, {:tool_requests, calls}}, %{pending_task: %{ref: ref}} = state) do
+  # Tool execution in Registry, send next LLM call
+  send(self(), :do_llm_call)
 end
 ```
 
-**Agent → Orchestrator:** Use `send` (plain message, Orchestrator receives via `handle_info`)
+**Agent → Orchestrator:** Via plain `send` (message, Orchestrator receives via `handle_info`)
 ```elixir
 send(state.orchestrator_pid, {:agent_done, self(), result})
+send(state.orchestrator_pid, {:agent_failed, self(), reason})
+```
+
+**Orchestrator internal:** Via `handle_info` for phase transitions
+```elixir
+def handle_info({:agent_done, agent_pid, result}, state) do
+  new_state = collect_agent_result(state, agent_pid, result)
+  if all_agents_done?(new_state) do
+    new_state = process_phase_results(new_state)  # sequencing
+  end
+  {:noreply, new_state}
+end
+```
+
+**Broadcast to UI:** Via Phoenix.PubSub
+```elixir
+Phoenix.PubSub.broadcast(Slidething.PubSub, "run_events:#{run_id}", 
+  {:run_event, {:phase_completed, :content}})
 ```
 
 ### Agent Scope Flexibility
