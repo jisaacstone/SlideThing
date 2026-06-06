@@ -207,8 +207,14 @@ export async function deletePage(pageId: string): Promise<void> {
   if (!res.ok) throw new Error("delete page failed");
 }
 
-export async function createPage(bookId: string): Promise<{ id: string; position: number }> {
-  const res = await fetch(`/api/books/${bookId}/pages`, { method: "POST" });
+export async function createPage(bookId: string, title?: string): Promise<{ id: string; position: number }> {
+  const body: Record<string, any> = {};
+  if (title) body.title = title;
+  const res = await fetch(`/api/books/${bookId}/pages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   if (!res.ok) throw new Error("create page failed");
   return res.json();
 }

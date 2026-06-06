@@ -11,6 +11,7 @@
       @create-book="handleCreateBook"
       @select-page="selectPage"
       @create-page="handleCreatePage"
+      @add-page="handleAddPage"
       @delete-page="handleDeletePage"
       @delete-book="handleDeleteBook"
     />
@@ -165,18 +166,31 @@ function closePanel() {
   prompts.value = [];
 }
 
-async function handleCreateBook(title: string) {
+async function handleCreateBook(title: string, prompt?: string) {
   const trimmed = title.trim();
   if (!trimmed) return;
   const result = await createBook(trimmed);
   await loadBooks();
   await selectBook(result.book_id);
+  if (prompt?.trim()) {
+    await submitPrompt(prompt.trim(), "", "");
+  }
 }
 
 async function handleCreatePage() {
   if (!currentBookId.value) return;
   await createPage(currentBookId.value);
   await loadPages(currentBookId.value);
+}
+
+async function handleAddPage(title: string, prompt: string) {
+  if (!currentBookId.value) return;
+  const page = await createPage(currentBookId.value, title.trim() || undefined);
+  await loadPages(currentBookId.value);
+  await selectPage(page.id);
+  if (prompt.trim()) {
+    await submitPrompt(prompt.trim(), "page", page.id);
+  }
 }
 
 async function handleDeletePage(pageId: string) {

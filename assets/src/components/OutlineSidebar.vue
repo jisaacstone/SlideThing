@@ -17,10 +17,16 @@
         <input
           v-model="newBookTitle"
           placeholder="Book title..."
-          @keyup.enter="$emit('create-book', newBookTitle)"
+          @keyup.enter="newBookPrompt ? null : submitCreateBook()"
           ref="newBookInput"
         />
-        <button class="btn-primary btn-sm" @click="$emit('create-book', newBookTitle)">Create</button>
+        <textarea
+          v-model="newBookPrompt"
+          placeholder="Initial prompt (optional)..."
+          class="prompt-input"
+          rows="2"
+        />
+        <button class="btn-primary btn-sm" @click="submitCreateBook()">Create</button>
       </div>
       <ul class="book-list">
         <li
@@ -37,7 +43,30 @@
       <h3 class="outline-book-title">{{ bookTitle }}</h3>
       <span class="outline-page-count">{{ pages.length }} pages</span>
 
-      <button class="btn-ghost new-page-btn" @click="$emit('create-page')">+ New Page</button>
+      <button class="btn-ghost new-page-btn" @click="showAddPageDialog = true">+ New Page</button>
+
+      <!-- Add Page Dialog -->
+      <div v-if="showAddPageDialog" class="dialog-overlay" @click.self="showAddPageDialog = false">
+        <div class="dialog">
+          <h4 class="dialog-title">Add Page</h4>
+          <input
+            v-model="newPageTitle"
+            placeholder="Page title (optional)..."
+            class="dialog-input"
+            ref="newPageInput"
+          />
+          <textarea
+            v-model="newPagePrompt"
+            placeholder="Initial prompt (optional)..."
+            class="dialog-textarea"
+            rows="3"
+          />
+          <div class="dialog-actions">
+            <button class="btn-ghost btn-sm" @click="cancelAddPage()">Cancel</button>
+            <button class="btn-primary btn-sm" @click="submitAddPage()">Add Page</button>
+          </div>
+        </div>
+      </div>
 
       <ul class="outline-list">
         <li
@@ -48,7 +77,7 @@
           @click="$emit('select-page', page.id)"
         >
           <span class="outline-icon">#</span>
-          <span class="outline-label">Page {{ page.position }}</span>
+          <span class="outline-label">{{ (page.metadata as any)?.title || `Page ${page.position}` }}</span>
           <button class="btn-ghost delete-btn" @click.stop="$emit('delete-page', page.id)" title="Delete page">✕</button>
         </li>
       </ul>
@@ -67,18 +96,46 @@ defineProps({
   bookTitle: { type: String, default: "" },
 });
 
-defineEmits<{
+const emit = defineEmits<{
   "back-to-books": [];
   "select-book": [bookId: string];
-  "create-book": [title: string];
+  "create-book": [title: string, prompt: string];
   "select-page": [pageId: string];
   "create-page": [];
+  "add-page": [title: string, prompt: string];
   "delete-page": [pageId: string];
   "delete-book": [];
 }>();
 
 const newBookTitle = ref("");
+const newBookPrompt = ref("");
 const newBookInput = ref<HTMLInputElement | null>(null);
+const showAddPageDialog = ref(false);
+const newPageTitle = ref("");
+const newPagePrompt = ref("");
+const newPageInput = ref<HTMLInputElement | null>(null);
+
+watch(showAddPageDialog, (val) => {
+  if (val) nextTick(() => newPageInput.value?.focus());
+});
+
+function submitCreateBook() {
+  if (!newBookTitle.value.trim()) return;
+  emit("create-book", newBookTitle.value, newBookPrompt.value);
+  newBookTitle.value = "";
+  newBookPrompt.value = "";
+}
+
+function submitAddPage() {
+  emit("add-page", newPageTitle.value, newPagePrompt.value);
+  cancelAddPage();
+}
+
+function cancelAddPage() {
+  showAddPageDialog.value = false;
+  newPageTitle.value = "";
+  newPagePrompt.value = "";
+}
 
 watch(
   () => newBookTitle.value,
@@ -183,11 +240,13 @@ watch(
 .new-book-form {
   margin-bottom: 12px;
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.new-book-form input {
-  flex: 1;
+.new-book-form input,
+.new-book-form .prompt-input {
+  width: 100%;
   padding: 6px 8px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 4px;
@@ -195,6 +254,64 @@ watch(
   color: var(--sidebar-text);
   font-size: 13px;
   outline: none;
+  box-sizing: border-box;
+}
+
+.new-book-form .prompt-input {
+  resize: none;
+  font-family: inherit;
+}
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.dialog {
+  background: var(--sidebar-bg);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 20px;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dialog-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.dialog-input,
+.dialog-textarea {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--sidebar-text);
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.dialog-textarea {
+  resize: none;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .book-list {

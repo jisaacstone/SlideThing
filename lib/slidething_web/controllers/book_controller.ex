@@ -37,9 +37,14 @@ defmodule SlidethingWeb.BookController do
     conn |> put_status(200) |> json(%{deleted: book_id})
   end
 
-  def create_page(conn, %{"book_id" => book_id}) do
+  def create_page(conn, %{"book_id" => book_id} = params) do
     next_pos = get_next_position(book_id)
-    {:ok, [page_id]} = Book.create_pages(book_id, [%{position: next_pos, metadata: %{}}])
+    metadata = case params["title"] do
+      nil -> %{}
+      "" -> %{}
+      title -> %{"title" => title}
+    end
+    {:ok, [page_id]} = Book.create_pages(book_id, [%{position: next_pos, metadata: metadata}])
     {:ok, page} = Book.get_page(page_id)
     conn |> put_status(201) |> json(page)
   end
