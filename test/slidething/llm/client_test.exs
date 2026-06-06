@@ -54,8 +54,9 @@ defmodule Slidething.LLM.ClientTest do
 
         result = Client.complete_json(spec, [])
         assert is_tuple(result), "Provider #{provider} should return a tuple"
+
         assert elem(result, 0) in [:tool_requests, :final_response, :error],
-          "Provider #{provider} should return a valid result"
+               "Provider #{provider} should return a valid result"
       end
     end
   end

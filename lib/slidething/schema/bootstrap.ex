@@ -35,7 +35,6 @@ defmodule Slidething.Schema.Bootstrap do
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
       """,
-
       pages: """
       CREATE TABLE IF NOT EXISTS pages (
         id TEXT PRIMARY KEY,
@@ -46,7 +45,6 @@ defmodule Slidething.Schema.Bootstrap do
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
       """,
-
       elements: """
       CREATE TABLE IF NOT EXISTS elements (
         id TEXT PRIMARY KEY,
@@ -58,7 +56,6 @@ defmodule Slidething.Schema.Bootstrap do
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
       """,
-
       element_versions: """
       CREATE TABLE IF NOT EXISTS element_versions (
         id TEXT PRIMARY KEY,
@@ -72,7 +69,6 @@ defmodule Slidething.Schema.Bootstrap do
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
       """,
-
       formats: """
       CREATE TABLE IF NOT EXISTS formats (
         id TEXT PRIMARY KEY,
@@ -85,7 +81,6 @@ defmodule Slidething.Schema.Bootstrap do
         safe_margin_mm REAL
       )
       """,
-
       book_formats: """
       CREATE TABLE IF NOT EXISTS book_formats (
         book_id TEXT NOT NULL REFERENCES books(id),
@@ -93,7 +88,6 @@ defmodule Slidething.Schema.Bootstrap do
         UNIQUE(book_id, format_id)
       )
       """,
-
       layout_versions: """
       CREATE TABLE IF NOT EXISTS layout_versions (
         id TEXT PRIMARY KEY,
@@ -105,7 +99,6 @@ defmodule Slidething.Schema.Bootstrap do
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
       """,
-
       prompts: """
       CREATE TABLE IF NOT EXISTS prompts (
         id TEXT PRIMARY KEY,
@@ -119,7 +112,6 @@ defmodule Slidething.Schema.Bootstrap do
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
       """,
-
       agent_runs: """
       CREATE TABLE IF NOT EXISTS agent_runs (
         id TEXT PRIMARY KEY,
@@ -136,7 +128,6 @@ defmodule Slidething.Schema.Bootstrap do
         completed_at TEXT
       )
       """,
-
       agent_messages: """
       CREATE TABLE IF NOT EXISTS agent_messages (
         id TEXT PRIMARY KEY,
@@ -153,16 +144,75 @@ defmodule Slidething.Schema.Bootstrap do
   end
 
   defp create_indexes do
-    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_pages_book ON pages(book_id)", [], log: :debug)
-    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_elements_page ON elements(page_id)", [], log: :debug)
-    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_element_versions_element ON element_versions(element_id)", [], log: :debug)
-    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_layout_versions_page ON layout_versions(page_id)", [], log: :debug)
-    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_layout_versions_page_format ON layout_versions(page_id, format_id)", [], log: :debug)
-    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_prompts_book ON prompts(book_id)", [], log: :debug)
-    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_prompts_target ON prompts(target_type, target_id)", [], log: :debug)
-    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_agent_runs_prompt ON agent_runs(prompt_id)", [], log: :debug)
-    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_agent_messages_run ON agent_messages(agent_run_id)", [], log: :debug)
-    Ecto.Adapters.SQL.query!(Repo, "CREATE INDEX IF NOT EXISTS idx_book_formats_book ON book_formats(book_id)", [], log: :debug)
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "CREATE INDEX IF NOT EXISTS idx_pages_book ON pages(book_id)",
+      [],
+      log: :debug
+    )
+
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "CREATE INDEX IF NOT EXISTS idx_elements_page ON elements(page_id)",
+      [],
+      log: :debug
+    )
+
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "CREATE INDEX IF NOT EXISTS idx_element_versions_element ON element_versions(element_id)",
+      [],
+      log: :debug
+    )
+
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "CREATE INDEX IF NOT EXISTS idx_layout_versions_page ON layout_versions(page_id)",
+      [],
+      log: :debug
+    )
+
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "CREATE INDEX IF NOT EXISTS idx_layout_versions_page_format ON layout_versions(page_id, format_id)",
+      [],
+      log: :debug
+    )
+
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "CREATE INDEX IF NOT EXISTS idx_prompts_book ON prompts(book_id)",
+      [],
+      log: :debug
+    )
+
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "CREATE INDEX IF NOT EXISTS idx_prompts_target ON prompts(target_type, target_id)",
+      [],
+      log: :debug
+    )
+
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "CREATE INDEX IF NOT EXISTS idx_agent_runs_prompt ON agent_runs(prompt_id)",
+      [],
+      log: :debug
+    )
+
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "CREATE INDEX IF NOT EXISTS idx_agent_messages_run ON agent_messages(agent_run_id)",
+      [],
+      log: :debug
+    )
+
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "CREATE INDEX IF NOT EXISTS idx_book_formats_book ON book_formats(book_id)",
+      [],
+      log: :debug
+    )
   end
 
   defp migrate_prompts do
@@ -224,6 +274,7 @@ defmodule Slidething.Schema.Bootstrap do
 
     if result.num_rows > 0 do
       Logger.info("[Bootstrap] Migrating format-default to format-print")
+
       Ecto.Adapters.SQL.query!(
         Repo,
         "UPDATE formats SET id = 'format-print', name = 'Children Book Square (Print)', dpi = 300, bleed_mm = 3.0, safe_margin_mm = 6.0 WHERE id = 'format-default'",
@@ -244,6 +295,7 @@ defmodule Slidething.Schema.Bootstrap do
 
     if not Enum.any?(cols.rows, fn row -> Enum.at(row, 1) == column end) do
       Logger.info("[Bootstrap] Adding column #{table}.#{column}")
+
       Ecto.Adapters.SQL.query!(
         Repo,
         "ALTER TABLE #{table} ADD COLUMN #{column} #{type}",
@@ -269,6 +321,7 @@ defmodule Slidething.Schema.Bootstrap do
 
     if result.num_rows == 0 do
       Logger.info("[Bootstrap] Seeding format: #{id}")
+
       Ecto.Adapters.SQL.query!(
         Repo,
         "INSERT INTO formats (id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",

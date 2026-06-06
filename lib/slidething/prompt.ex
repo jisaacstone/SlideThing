@@ -88,8 +88,16 @@ defmodule Slidething.Prompt do
       )
 
     rows =
-      Enum.map(result.rows, fn [id, user_prompt, result_summary,
-                                ttype, tid, status, created, completed] ->
+      Enum.map(result.rows, fn [
+                                 id,
+                                 user_prompt,
+                                 result_summary,
+                                 ttype,
+                                 tid,
+                                 status,
+                                 created,
+                                 completed
+                               ] ->
         targets =
           case {ttype, tid} do
             {nil, _} -> []

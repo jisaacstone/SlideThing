@@ -33,16 +33,34 @@ defmodule Slidething.LLM.Provider.OpenRouterTest do
     test "serializes assistant message with tool_calls" do
       calls = [
         %ToolCall{call_id: "call_1", tool: :get_book, args: %{"book_id" => "book_abc"}},
-        %ToolCall{call_id: "call_2", tool: :create_pages, args: %{"book_id" => "book_abc", "count" => 3}}
+        %ToolCall{
+          call_id: "call_2",
+          tool: :create_pages,
+          args: %{"book_id" => "book_abc", "count" => 3}
+        }
       ]
 
       messages = [%Message{role: :assistant, content: "", tool_calls: calls}]
       result = OpenRouter.messages_to_openai_messages(messages)
 
-      assert [%{role: "assistant", content: "", tool_calls: [
-        %{id: "call_1", type: "function", function: %{name: "get_book", arguments: json}},
-        %{id: "call_2", type: "function", function: %{name: "create_pages", arguments: json2}}
-      ]}] = result
+      assert [
+               %{
+                 role: "assistant",
+                 content: "",
+                 tool_calls: [
+                   %{
+                     id: "call_1",
+                     type: "function",
+                     function: %{name: "get_book", arguments: json}
+                   },
+                   %{
+                     id: "call_2",
+                     type: "function",
+                     function: %{name: "create_pages", arguments: json2}
+                   }
+                 ]
+               }
+             ] = result
 
       assert Jason.decode!(json) == %{"book_id" => "book_abc"}
       assert Jason.decode!(json2) == %{"book_id" => "book_abc", "count" => 3}
@@ -56,7 +74,16 @@ defmodule Slidething.LLM.Provider.OpenRouterTest do
     end
 
     test "serializes single tool result with call_id" do
-      results = [%ToolResult{call_id: "call_x", tool: :get_book, success: true, data: %{id: "abc"}, error: nil}]
+      results = [
+        %ToolResult{
+          call_id: "call_x",
+          tool: :get_book,
+          success: true,
+          data: %{id: "abc"},
+          error: nil
+        }
+      ]
+
       messages = [%Message{role: :tool, tool_results: results}]
       result = OpenRouter.messages_to_openai_messages(messages)
 
@@ -77,9 +104,16 @@ defmodule Slidething.LLM.Provider.OpenRouterTest do
 
     test "serializes multiple tool results as separate messages" do
       results = [
-        %ToolResult{call_id: "call_1", tool: :get_book, success: true, data: %{id: "abc"}, error: nil},
+        %ToolResult{
+          call_id: "call_1",
+          tool: :get_book,
+          success: true,
+          data: %{id: "abc"},
+          error: nil
+        },
         %ToolResult{call_id: "call_2", tool: :create_pages, success: true, data: nil, error: nil}
       ]
+
       messages = [%Message{role: :tool, tool_results: results}]
       result = OpenRouter.messages_to_openai_messages(messages)
 
@@ -91,7 +125,16 @@ defmodule Slidething.LLM.Provider.OpenRouterTest do
     end
 
     test "serializes failed tool result" do
-      results = [%ToolResult{call_id: "call_e", tool: :get_book, success: false, data: nil, error: "not found"}]
+      results = [
+        %ToolResult{
+          call_id: "call_e",
+          tool: :get_book,
+          success: false,
+          data: nil,
+          error: "not found"
+        }
+      ]
+
       messages = [%Message{role: :tool, tool_results: results}]
       result = OpenRouter.messages_to_openai_messages(messages)
 
@@ -110,7 +153,16 @@ defmodule Slidething.LLM.Provider.OpenRouterTest do
 
     test "serializes full conversation: system → user → assistant(tool_calls) → tool" do
       calls = [%ToolCall{call_id: "call_abc", tool: :get_book, args: %{"book_id" => "book_1"}}]
-      results = [%ToolResult{call_id: "call_abc", tool: :get_book, success: true, data: %{id: "book_1"}, error: nil}]
+
+      results = [
+        %ToolResult{
+          call_id: "call_abc",
+          tool: :get_book,
+          success: true,
+          data: %{id: "book_1"},
+          error: nil
+        }
+      ]
 
       messages = [
         %Message{role: :system, content: "System prompt"},
@@ -132,7 +184,10 @@ defmodule Slidething.LLM.Provider.OpenRouterTest do
 
     test "all serialized messages are JSON-encodable" do
       calls = [%ToolCall{call_id: "call_1", tool: :get_book, args: %{"book_id" => "abc"}}]
-      results = [%ToolResult{call_id: "call_1", tool: :get_book, success: true, data: %{}, error: nil}]
+
+      results = [
+        %ToolResult{call_id: "call_1", tool: :get_book, success: true, data: %{}, error: nil}
+      ]
 
       messages = [
         %Message{role: :system, content: "System"},
@@ -163,7 +218,8 @@ defmodule Slidething.LLM.Provider.OpenRouterTest do
         }
       }
 
-      assert {:tool_requests, [%ToolCall{call_id: "call_abc", tool: :get_book, args: %{"book_id" => "book_1"}}]} =
+      assert {:tool_requests,
+              [%ToolCall{call_id: "call_abc", tool: :get_book, args: %{"book_id" => "book_1"}}]} =
                OpenRouter.parse_choice(choice)
     end
 

@@ -58,7 +58,10 @@ defmodule Slidething.Tool.Registry do
     %{pages: pages}
   end
 
-  defp do_execute(:get_recent_prompts, %{"target_type" => target_type, "target_id" => target_id} = args) do
+  defp do_execute(
+         :get_recent_prompts,
+         %{"target_type" => target_type, "target_id" => target_id} = args
+       ) do
     limit = args["limit"] || 5
     prompts = Slidething.Prompt.list_recent(target_type, target_id, limit)
     %{prompts: prompts}
@@ -77,7 +80,10 @@ defmodule Slidething.Tool.Registry do
     end
   end
 
-  defp do_execute(:create_element, %{"page_id" => page_id, "element_type" => element_type, "content" => content} = args) do
+  defp do_execute(
+         :create_element,
+         %{"page_id" => page_id, "element_type" => element_type, "content" => content} = args
+       ) do
     prompt = args["prompt"]
     {:ok, data} = Slidething.Element.create(page_id, element_type, content, prompt: prompt)
     data
@@ -85,6 +91,7 @@ defmodule Slidething.Tool.Registry do
 
   defp do_execute(:update_element, %{"element_id" => element_id, "content" => content} = args) do
     prompt = args["prompt"]
+
     case Slidething.Element.update(element_id, content, prompt: prompt) do
       {:ok, data} -> data
       {:error, reason} -> raise "Update failed: #{reason}"
@@ -111,14 +118,25 @@ defmodule Slidething.Tool.Registry do
   defp do_execute(:get_format, %{"format_id" => format_id}) do
     result =
       Slidething.Repo
-      |> Ecto.Adapters.SQL.query!("SELECT id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm FROM formats WHERE id = ?", [format_id])
+      |> Ecto.Adapters.SQL.query!(
+        "SELECT id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm FROM formats WHERE id = ?",
+        [format_id]
+      )
 
     case result.rows do
-      [] -> raise "Format not found: #{format_id}"
+      [] ->
+        raise "Format not found: #{format_id}"
+
       [[id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm]] ->
         %{
-          id: id, name: name, unit: unit, width: width, height: height,
-          dpi: dpi, bleed_mm: bleed_mm, safe_margin_mm: safe_margin_mm
+          id: id,
+          name: name,
+          unit: unit,
+          width: width,
+          height: height,
+          dpi: dpi,
+          bleed_mm: bleed_mm,
+          safe_margin_mm: safe_margin_mm
         }
     end
   end
@@ -129,7 +147,9 @@ defmodule Slidething.Tool.Registry do
     provider = (spec && spec.image_provider) || "mock"
     model = (spec && spec.image_model) || "mock-image-model"
 
-    Logger.info("[Tool.Registry] generate_image provider=#{provider} model=#{model} aspect=#{aspect}: #{String.slice(prompt, 0, 80)}")
+    Logger.info(
+      "[Tool.Registry] generate_image provider=#{provider} model=#{model} aspect=#{aspect}: #{String.slice(prompt, 0, 80)}"
+    )
 
     case Slidething.Image.Client.generate(provider, model, prompt, aspect) do
       {:ok, asset_path} ->
@@ -142,6 +162,7 @@ defmodule Slidething.Tool.Registry do
 
   defp do_execute(:store_asset, %{"element_id" => element_id, "asset_path" => asset_path} = args) do
     prompt = args["prompt"]
+
     case Slidething.Element.update(element_id, nil, asset_path: asset_path, prompt: prompt) do
       {:ok, data} -> data
       {:error, reason} -> raise "Asset store failed: #{reason}"
@@ -149,7 +170,10 @@ defmodule Slidething.Tool.Registry do
   end
 
   # Layout tools
-  defp do_execute(:propose_layout, %{"page_id" => page_id, "format_id" => format_id, "element_layouts" => layouts} = args) do
+  defp do_execute(
+         :propose_layout,
+         %{"page_id" => page_id, "format_id" => format_id, "element_layouts" => layouts} = args
+       ) do
     run_id = args["run_id"]
     {:ok, data} = Slidething.Layout.create(page_id, format_id, layouts, run_id: run_id)
     data

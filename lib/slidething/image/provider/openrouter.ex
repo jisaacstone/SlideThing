@@ -62,7 +62,10 @@ defmodule Slidething.Image.Provider.OpenRouter do
         {:error, msg}
 
       {:ok, %{status: status, body: body}} ->
-        Logger.error("[Image.OpenRouter] Unexpected response status=#{status} body=#{inspect(body)}")
+        Logger.error(
+          "[Image.OpenRouter] Unexpected response status=#{status} body=#{inspect(body)}"
+        )
+
         {:error, {:unexpected_response, status}}
 
       {:error, reason} ->
@@ -101,6 +104,7 @@ defmodule Slidething.Image.Provider.OpenRouter do
     case String.split(rest, ";base64,", parts: 2) do
       [fmt, b64] ->
         ext = "." <> hd(String.split(fmt, "+"))
+
         case Base.decode64(b64) do
           {:ok, bytes} -> {:ok, ext, bytes}
           :error -> :error

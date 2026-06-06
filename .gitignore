@@ -14,3 +14,5 @@ erl_crash.dump
 # OpenRouter config files (local, not tracked)
 agents-openrouter.json
 agents-openrouter-free.json
+
+node_modules

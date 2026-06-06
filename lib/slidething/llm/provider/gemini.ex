@@ -45,7 +45,9 @@ defmodule Slidething.LLM.Provider.Gemini do
       if Enum.empty?(agent_spec.tools) do
         body
       else
-        Map.put(body, :tools, [%{functionDeclarations: build_function_declarations(agent_spec.tools)}])
+        Map.put(body, :tools, [
+          %{functionDeclarations: build_function_declarations(agent_spec.tools)}
+        ])
       end
 
     Logger.debug("[Gemini] Request: model=#{agent_spec.model}")
@@ -81,7 +83,12 @@ defmodule Slidething.LLM.Provider.Gemini do
     end)
   end
 
-  defp message_to_gemini_parts(%Message{role: role, content: content, tool_calls: calls, tool_results: _results})
+  defp message_to_gemini_parts(%Message{
+         role: role,
+         content: content,
+         tool_calls: calls,
+         tool_results: _results
+       })
        when role in [:assistant, :model] and not is_nil(calls) do
     texts =
       if content do
@@ -103,12 +110,15 @@ defmodule Slidething.LLM.Provider.Gemini do
   end
 
   defp message_to_gemini_parts(%Message{role: :tool, tool_results: results}) do
-    parts = Enum.map(results, fn result ->
-      %{functionResponse: %{
-        name: to_string(result.tool),
-        response: %{success: result.success, data: result.data, error: result.error}
-      }}
-    end)
+    parts =
+      Enum.map(results, fn result ->
+        %{
+          functionResponse: %{
+            name: to_string(result.tool),
+            response: %{success: result.success, data: result.data, error: result.error}
+          }
+        }
+      end)
 
     [%{role: :tool, parts: parts}]
   end
@@ -176,7 +186,13 @@ defmodule Slidething.LLM.Provider.Gemini do
       case Slidething.Tool.Schemas.get(tool) do
         nil ->
           Logger.warning("[Gemini] Unknown tool schema: #{tool}")
-          %{name: to_string(tool), description: "Tool: #{tool}", parameters: %{type: "object", properties: %{}}}
+
+          %{
+            name: to_string(tool),
+            description: "Tool: #{tool}",
+            parameters: %{type: "object", properties: %{}}
+          }
+
         schema ->
           schema
       end

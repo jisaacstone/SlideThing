@@ -118,7 +118,19 @@ defmodule Slidething.Transcript do
         [prompt_id]
       )
 
-    Enum.map(runs.rows, fn [id, agent_type, st, sid, prov, model, status, result, fail, started, completed] ->
+    Enum.map(runs.rows, fn [
+                             id,
+                             agent_type,
+                             st,
+                             sid,
+                             prov,
+                             model,
+                             status,
+                             result,
+                             fail,
+                             started,
+                             completed
+                           ] ->
       %{
         id: id,
         agent_type: agent_type,
@@ -192,7 +204,10 @@ defmodule Slidething.Transcript do
   end
 
   defp encode_result({:final, msg}), do: Jason.encode!(%{type: "final", message: msg})
-  defp encode_result({:patch, patch}), do: Jason.encode!(%{type: "patch", patch: safe_jsonable(patch)})
+
+  defp encode_result({:patch, patch}),
+    do: Jason.encode!(%{type: "patch", patch: safe_jsonable(patch)})
+
   defp encode_result(other), do: inspect(other)
 
   defp decode_json(nil), do: nil

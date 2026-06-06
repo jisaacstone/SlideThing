@@ -78,12 +78,16 @@ defmodule Slidething.Agent.GeneratedPlan do
 
     phases =
       case map["phases"] do
-        nil -> []
+        nil ->
+          []
+
         ps when is_list(ps) ->
           ps
           |> Enum.map(&phase_from_map/1)
           |> Enum.uniq_by(& &1.name)
-        _ -> []
+
+        _ ->
+          []
       end
 
     %__MODULE__{context: context, phases: phases}
@@ -91,15 +95,15 @@ defmodule Slidething.Agent.GeneratedPlan do
 
   def phase_from_map(p) do
     %Slidething.Agent.Phase{
-      name:        p["name"],
-      step_type:   atomize(p["step_type"]),
-      agent_type:  atomize(p["agent_type"]),
-      scope:       atomize(p["scope"]),
-      context:     p["context"],
-      condition:   atomize(p["condition"]),
-      depends_on:  p["depends_on"] || [],
+      name: p["name"],
+      step_type: atomize(p["step_type"]),
+      agent_type: atomize(p["agent_type"]),
+      scope: atomize(p["scope"]),
+      context: p["context"],
+      condition: atomize(p["condition"]),
+      depends_on: p["depends_on"] || [],
       max_retries: p["max_retries"] || 2,
-      config:      p["config"] || %{}
+      config: p["config"] || %{}
     }
   end
 
@@ -143,6 +147,7 @@ defmodule Slidething.Agent.PlanValidator do
       if is_nil(p.name) or p.name == "",
         do: raise("Phase is missing a name: #{inspect(p)}")
     end)
+
     :ok
   end
 
@@ -155,21 +160,25 @@ defmodule Slidething.Agent.PlanValidator do
 
   defp check_dep_refs(phases) do
     names = MapSet.new(phases, & &1.name)
+
     Enum.each(phases, fn p ->
       Enum.each(p.depends_on, fn dep ->
         unless MapSet.member?(names, dep),
           do: raise("Phase '#{p.name}' depends on unknown phase '#{dep}'")
       end)
     end)
+
     :ok
   end
 
   defp check_no_cycles(phases) do
     graph = Map.new(phases, fn p -> {p.name, p.depends_on} end)
+
     Enum.each(phases, fn p ->
       if has_cycle?(p.name, graph, MapSet.new()),
         do: raise("Cycle detected involving phase '#{p.name}'")
     end)
+
     :ok
   end
 
@@ -186,11 +195,14 @@ defmodule Slidething.Agent.PlanValidator do
     Enum.each(phases, fn p ->
       unless p.step_type in Phase.valid_step_types(),
         do: raise("Phase '#{p.name}' has invalid step_type: #{p.step_type}")
+
       unless p.scope in Phase.valid_scopes(),
         do: raise("Phase '#{p.name}' has invalid scope: #{p.scope}")
+
       unless p.condition in Phase.valid_conditions(),
         do: raise("Phase '#{p.name}' has invalid condition: #{p.condition}")
     end)
+
     :ok
   end
 end
@@ -226,6 +238,7 @@ defmodule Slidething.Agent.PlanExecutor do
 
   def condition_met?(:has_layout_issues, state) do
     issues = Map.get(state, :validation_issues, %{})
+
     Enum.any?(issues, fn {_phase, phase_issues} ->
       is_list(phase_issues) and phase_issues != []
     end)
@@ -233,6 +246,7 @@ defmodule Slidething.Agent.PlanExecutor do
 
   def condition_met?(:has_content_issues, state) do
     issues = Map.get(state, :validation_issues, %{})
+
     Enum.any?(issues, fn {phase_name, phase_issues} ->
       String.contains?(to_string(phase_name), "content") and
         is_list(phase_issues) and phase_issues != []
@@ -245,9 +259,11 @@ defmodule Slidething.Agent.PlanExecutor do
 
   @doc "True when all non-conditional phases are done and no conditional phases remain runnable."
   def all_phases_complete?(phases, completed_phases, orchestrator_state) do
-    required = Enum.reject(phases, fn p ->
-      not is_nil(p.condition) and not condition_met?(p.condition, orchestrator_state)
-    end)
+    required =
+      Enum.reject(phases, fn p ->
+        not is_nil(p.condition) and not condition_met?(p.condition, orchestrator_state)
+      end)
+
     Enum.all?(required, fn p -> MapSet.member?(completed_phases, p.name) end)
   end
 
@@ -322,9 +338,11 @@ defmodule Slidething.Agent.PlanPatcher do
 
   defp apply_one(phases, %{"op" => "update", "name" => name, "fields" => fields}, _completed) do
     if Enum.any?(phases, &(&1.name == name)) do
-      new_phases = Enum.map(phases, fn p ->
-        if p.name == name, do: safe_update(p, fields), else: p
-      end)
+      new_phases =
+        Enum.map(phases, fn p ->
+          if p.name == name, do: safe_update(p, fields), else: p
+        end)
+
       {:ok, new_phases}
     else
       {:error, "cannot update unknown phase '#{name}'"}
@@ -340,10 +358,18 @@ defmodule Slidething.Agent.PlanPatcher do
   # Only allow updating fields that don't affect control flow structurally.
   defp safe_update(phase, fields) do
     Enum.reduce(fields, phase, fn
-      {"max_retries", v}, p when is_integer(v) and v >= 0 -> %{p | max_retries: v}
-      {"condition", nil}, p -> %{p | condition: nil}
-      {"condition", v}, p when is_binary(v) -> %{p | condition: String.to_atom(v)}
-      {"config", v}, p when is_map(v) -> %{p | config: v}
+      {"max_retries", v}, p when is_integer(v) and v >= 0 ->
+        %{p | max_retries: v}
+
+      {"condition", nil}, p ->
+        %{p | condition: nil}
+
+      {"condition", v}, p when is_binary(v) ->
+        %{p | condition: String.to_atom(v)}
+
+      {"config", v}, p when is_map(v) ->
+        %{p | config: v}
+
       {k, _}, p ->
         require Logger
         Logger.warning("[PlanPatcher] Ignoring disallowed update field '#{k}'")

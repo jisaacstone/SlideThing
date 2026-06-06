@@ -21,33 +21,25 @@ build-ui:
 test:
 	$(MIX) test
 
-## Run only a single test file or module
-test-file:
-	$(MIX) test $(FILE)
+## TypeScript typecheck (Vue)
+typecheck:
+	cd assets && npx vue-tsc --noEmit
 
 ## Lint: check Elixir formatting (dry-run)
-lint:
+lint: typecheck
 	$(MIX) format --check-formatted
 
 ## Fix Elixir formatting in-place
 format:
 	$(MIX) format
 
-## TypeScript typecheck (Vue)
-typecheck:
-	cd assets && npx vue-tsc --noEmit
-
 ## Start dev server
 server:
 	$(MIX) phx.server
 
-## Start dev server with OpenRouter (real LLM + image generation)
-server-openrouter:
-	SLIDETHING_AGENT_CONFIG=config/agents.openrouter.json $(MIX) phx.server
-
 ## Build UI + start server (most common dev workflow)
-dev: build-ui
-	$(MIX) phx.server
+dev: lint
+	SLIDETHING_AGENT_CONFIG=config/agents.openrouter.json $(MIX) phx.server
 
 ## Install deps and create DB
 setup:

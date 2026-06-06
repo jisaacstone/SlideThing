@@ -9,13 +9,21 @@ defmodule SlidethingWeb.FormatController do
   def list_all(conn, _params) do
     result =
       Slidething.Repo
-      |> Ecto.Adapters.SQL.query!("SELECT id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm FROM formats")
+      |> Ecto.Adapters.SQL.query!(
+        "SELECT id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm FROM formats"
+      )
 
     formats =
       for [id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm] <- result.rows do
         %{
-          id: id, name: name, unit: unit, width: width, height: height,
-          dpi: dpi, bleed_mm: bleed_mm, safe_margin_mm: safe_margin_mm
+          id: id,
+          name: name,
+          unit: unit,
+          width: width,
+          height: height,
+          dpi: dpi,
+          bleed_mm: bleed_mm,
+          safe_margin_mm: safe_margin_mm
         }
       end
 

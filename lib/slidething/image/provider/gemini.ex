@@ -36,7 +36,11 @@ defmodule Slidething.Image.Provider.Gemini do
 
     Logger.debug("[Image.Gemini] Generating model=#{model} aspect=#{aspect_ratio}")
 
-    case Req.post(url, json: body, receive_timeout: 120_000, headers: [{"content-type", "application/json"}]) do
+    case Req.post(url,
+           json: body,
+           receive_timeout: 120_000,
+           headers: [{"content-type", "application/json"}]
+         ) do
       {:ok, %{body: %{"predictions" => [%{"bytesBase64Encoded" => b64} | _]}}} ->
         case Base.decode64(b64) do
           {:ok, bytes} -> Slidething.AssetStore.store(bytes, "imagen.png")

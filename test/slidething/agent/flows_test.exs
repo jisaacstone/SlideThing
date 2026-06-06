@@ -66,16 +66,16 @@ defmodule Slidething.Agent.FlowsTest do
       phase_names = phase_names_from(events, :phase_completed)
 
       # Book-level planner phases complete before process_pages
-      decide_idx   = Enum.find_index(phase_names, &(&1 == "decide_theme"))
-      assign_idx   = Enum.find_index(phase_names, &(&1 == "assign_outline"))
-      process_idx  = Enum.find_index(phase_names, &(&1 == "process_pages"))
+      decide_idx = Enum.find_index(phase_names, &(&1 == "decide_theme"))
+      assign_idx = Enum.find_index(phase_names, &(&1 == "assign_outline"))
+      process_idx = Enum.find_index(phase_names, &(&1 == "process_pages"))
 
-      assert decide_idx != nil,  "expected decide_theme to complete"
-      assert assign_idx != nil,  "expected assign_outline to complete"
+      assert decide_idx != nil, "expected decide_theme to complete"
+      assert assign_idx != nil, "expected assign_outline to complete"
       assert process_idx != nil, "expected process_pages to complete"
 
-      assert decide_idx  < assign_idx,  "decide_theme must complete before assign_outline"
-      assert assign_idx  < process_idx, "assign_outline must complete before process_pages"
+      assert decide_idx < assign_idx, "decide_theme must complete before assign_outline"
+      assert assign_idx < process_idx, "assign_outline must complete before process_pages"
     end
 
     test "coordinator runs after process_pages and before validate_book", %{pid: pid} do
@@ -84,16 +84,16 @@ defmodule Slidething.Agent.FlowsTest do
       events = collect_events_until(:completed, @run_timeout)
       phase_names = phase_names_from(events, :phase_completed)
 
-      process_idx  = Enum.find_index(phase_names, &(&1 == "process_pages"))
-      review_idx   = Enum.find_index(phase_names, &(&1 == "review_book"))
+      process_idx = Enum.find_index(phase_names, &(&1 == "process_pages"))
+      review_idx = Enum.find_index(phase_names, &(&1 == "review_book"))
       validate_idx = Enum.find_index(phase_names, &(&1 == "validate_book"))
 
-      assert process_idx  != nil, "expected process_pages to complete"
-      assert review_idx   != nil, "expected review_book to complete"
+      assert process_idx != nil, "expected process_pages to complete"
+      assert review_idx != nil, "expected review_book to complete"
       assert validate_idx != nil, "expected validate_book to complete"
 
-      assert process_idx < review_idx,   "process_pages must complete before review_book"
-      assert review_idx  < validate_idx, "review_book must complete before validate_book"
+      assert process_idx < review_idx, "process_pages must complete before review_book"
+      assert review_idx < validate_idx, "review_book must complete before validate_book"
     end
 
     test "page_pipeline agents write elements to every page", %{pid: pid} do
@@ -123,6 +123,7 @@ defmodule Slidething.Agent.FlowsTest do
         case Slidething.Layout.get_latest(page.id, "format-web") do
           {:ok, layout} ->
             assert is_list(layout.element_layouts)
+
           _ ->
             # No layout is acceptable if page has no elements (e.g., mock skip)
             :ok
@@ -136,6 +137,7 @@ defmodule Slidething.Agent.FlowsTest do
       assert_receive {:run_event, %{event: :completed}}, @run_timeout
 
       state = Orchestrator.get_state(pid)
+
       assert Map.has_key?(state.phase_context, "review_book"),
              "review_book context should be stored after coordinator completes"
     end
@@ -157,7 +159,9 @@ defmodule Slidething.Agent.FlowsTest do
 
   describe "Flow B: add a page to an existing book" do
     setup do
-      {:ok, %{book_id: book_id}} = Slidething.Book.create("Existing Fox Book", %{"theme" => "adventure"})
+      {:ok, %{book_id: book_id}} =
+        Slidething.Book.create("Existing Fox Book", %{"theme" => "adventure"})
+
       {:ok, existing_ids} = Slidething.Book.create_pages(book_id, 2)
       %{book_id: book_id, existing_page_ids: existing_ids}
     end
@@ -172,6 +176,7 @@ defmodule Slidething.Agent.FlowsTest do
       assert_receive {:run_event, %{event: :completed}}, @run_timeout
 
       {:ok, pages} = Slidething.Book.get_outline(book_id)
+
       assert length(pages) == length(existing_ids) + 1,
              "should have exactly one new page (had #{length(existing_ids)}, now #{length(pages)})"
     end
@@ -205,6 +210,7 @@ defmodule Slidething.Agent.FlowsTest do
       for id <- existing_ids do
         assert id not in state.page_ids,
                "existing page #{id} should not be in scope"
+
         assert Slidething.Element.list(id) == [],
                "existing page #{id} should remain untouched"
       end
@@ -227,8 +233,8 @@ defmodule Slidething.Agent.FlowsTest do
       phase_names = phase_names_from(events, :phase_completed)
 
       assert "generate_content" in phase_names
-      assert "generate_layout"  in phase_names
-      assert "validate_layout"  in phase_names
+      assert "generate_layout" in phase_names
+      assert "validate_layout" in phase_names
     end
   end
 
@@ -245,7 +251,12 @@ defmodule Slidething.Agent.FlowsTest do
       {:ok, %{element_id: elem_id}} =
         Slidething.Element.create(page_id, "image", "original fox in forest")
 
-      %{book_id: book_id, target_page_id: page_id, image_elem_id: elem_id, other_page_ids: other_ids}
+      %{
+        book_id: book_id,
+        target_page_id: page_id,
+        image_elem_id: elem_id,
+        other_page_ids: other_ids
+      }
     end
 
     test "run completes targeting a single page", %{
@@ -284,6 +295,7 @@ defmodule Slidething.Agent.FlowsTest do
       assert_receive {:run_event, %{event: :completed}}, @run_timeout
 
       state = Orchestrator.get_state(pid)
+
       assert state.page_ids == [page_id],
              "scope should be limited to target page only, got: #{inspect(state.page_ids)}"
 
@@ -338,6 +350,7 @@ defmodule Slidething.Agent.FlowsTest do
 
       # Element should have at least one new version written by page_pipeline
       {:ok, after_elem} = Slidething.Element.get(elem_id, history: 5)
+
       assert after_elem.latest_version.version > original_version,
              "image element should have a new version after the run"
     end
@@ -379,23 +392,25 @@ defmodule Slidething.Agent.FlowsTest do
     } do
       # Override coordinator to return a patch adding a revision phase
       Slidething.Agent.Config.set(:coordinator, [])
-      _patch_response = Jason.encode!(%{
-        "context" => %{"assessment" => "page 1 needs revision"},
-        "plan_patches" => [
-          %{
-            "op" => "add",
-            "phase" => %{
-              "name" => "revise_pages_round2",
-              "step_type" => "agent",
-              "agent_type" => "page_pipeline",
-              "scope" => "per_page",
-              "depends_on" => ["review_book"],
-              "condition" => nil,
-              "max_retries" => 1
+
+      _patch_response =
+        Jason.encode!(%{
+          "context" => %{"assessment" => "page 1 needs revision"},
+          "plan_patches" => [
+            %{
+              "op" => "add",
+              "phase" => %{
+                "name" => "revise_pages_round2",
+                "step_type" => "agent",
+                "agent_type" => "page_pipeline",
+                "scope" => "per_page",
+                "depends_on" => ["review_book"],
+                "condition" => nil,
+                "max_retries" => 1
+              }
             }
-          }
-        ]
-      })
+          ]
+        })
 
       # Swap coordinator mock response for this test via process dictionary
       # (The mock provider reads from the message history, so we inject via a custom agent config)
@@ -441,7 +456,15 @@ defmodule Slidething.Agent.FlowsTest do
     test "coordinator cannot add another coordinator phase" do
       alias Slidething.Agent.{PlanPatcher, Phase}
 
-      existing = [%Phase{name: "p1", step_type: :agent, agent_type: :content, scope: :per_page, depends_on: []}]
+      existing = [
+        %Phase{
+          name: "p1",
+          step_type: :agent,
+          agent_type: :content,
+          scope: :per_page,
+          depends_on: []
+        }
+      ]
 
       bad_patch = %{
         "op" => "add",
@@ -461,17 +484,40 @@ defmodule Slidething.Agent.FlowsTest do
     test "cannot remove a completed phase" do
       alias Slidething.Agent.{PlanPatcher, Phase}
 
-      existing = [%Phase{name: "done_phase", step_type: :agent, agent_type: :content, scope: :per_page, depends_on: []}]
+      existing = [
+        %Phase{
+          name: "done_phase",
+          step_type: :agent,
+          agent_type: :content,
+          scope: :per_page,
+          depends_on: []
+        }
+      ]
+
       completed = MapSet.new(["done_phase"])
 
-      assert {:error, msg} = PlanPatcher.apply(existing, [%{"op" => "remove", "name" => "done_phase"}], completed)
+      assert {:error, msg} =
+               PlanPatcher.apply(
+                 existing,
+                 [%{"op" => "remove", "name" => "done_phase"}],
+                 completed
+               )
+
       assert msg =~ "already-completed"
     end
 
     test "cannot add a phase with a duplicate name" do
       alias Slidething.Agent.{PlanPatcher, Phase}
 
-      existing = [%Phase{name: "generate_content", step_type: :agent, agent_type: :content, scope: :per_page, depends_on: []}]
+      existing = [
+        %Phase{
+          name: "generate_content",
+          step_type: :agent,
+          agent_type: :content,
+          scope: :per_page,
+          depends_on: []
+        }
+      ]
 
       dup_patch = %{
         "op" => "add",
@@ -491,9 +537,22 @@ defmodule Slidething.Agent.FlowsTest do
     test "update op can change max_retries" do
       alias Slidething.Agent.{PlanPatcher, Phase}
 
-      existing = [%Phase{name: "gen", step_type: :agent, agent_type: :content, scope: :per_page, depends_on: [], max_retries: 2}]
+      existing = [
+        %Phase{
+          name: "gen",
+          step_type: :agent,
+          agent_type: :content,
+          scope: :per_page,
+          depends_on: [],
+          max_retries: 2
+        }
+      ]
 
-      {:ok, [updated]} = PlanPatcher.apply(existing, [%{"op" => "update", "name" => "gen", "fields" => %{"max_retries" => 5}}])
+      {:ok, [updated]} =
+        PlanPatcher.apply(existing, [
+          %{"op" => "update", "name" => "gen", "fields" => %{"max_retries" => 5}}
+        ])
+
       assert updated.max_retries == 5
     end
   end

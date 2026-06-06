@@ -23,5 +23,6 @@ config :phoenix, :stacktrace_depth, 20
 
 config :phoenix, :plug_init_mode, :runtime
 
-config :slidething, :agent_config_path,
-  System.get_env("SLIDETHING_AGENT_CONFIG") || "config/agents.json"
+config :slidething,
+       :agent_config_path,
+       System.get_env("SLIDETHING_AGENT_CONFIG") || "config/agents.json"

@@ -22,21 +22,24 @@ defmodule Slidething.Agent.GenServerTest do
     }
 
     test_pid = self()
-    {:ok, orchestrator_pid} = Task.start(fn -> 
-      receive do
-        msg -> send(test_pid, {:received, msg})
-      after
-        5000 -> :ok
-      end
-    end)
 
-    {:ok, agent_pid} = AgentGenServer.start_link(
-      run_id: run_id,
-      agent_type: :content,
-      scope: {:page, page_id},
-      orchestrator_pid: orchestrator_pid,
-      agent_spec: spec
-    )
+    {:ok, orchestrator_pid} =
+      Task.start(fn ->
+        receive do
+          msg -> send(test_pid, {:received, msg})
+        after
+          5000 -> :ok
+        end
+      end)
+
+    {:ok, agent_pid} =
+      AgentGenServer.start_link(
+        run_id: run_id,
+        agent_type: :content,
+        scope: {:page, page_id},
+        orchestrator_pid: orchestrator_pid,
+        agent_spec: spec
+      )
 
     %{
       run_id: run_id,
@@ -48,18 +51,23 @@ defmodule Slidething.Agent.GenServerTest do
   end
 
   describe "start_link/1" do
-    test "starts agent and registers in registry", %{agent_pid: agent_pid, run_id: run_id, page_id: page_id} do
+    test "starts agent and registers in registry", %{
+      agent_pid: agent_pid,
+      run_id: run_id,
+      page_id: page_id
+    } do
       assert Process.alive?(agent_pid)
 
-      assert [{^agent_pid, _}] = Registry.lookup(
-        Slidething.AgentRegistry,
-        {run_id, nil, :content, {:page, page_id}}
-      )
+      assert [{^agent_pid, _}] =
+               Registry.lookup(
+                 Slidething.AgentRegistry,
+                 {run_id, nil, :content, {:page, page_id}}
+               )
     end
 
     test "initializes with correct state", %{agent_pid: agent_pid} do
       state = AgentGenServer.get_state(agent_pid)
-      
+
       assert state.status == :idle
       assert state.iteration == 0
       assert state.messages == []
@@ -68,7 +76,7 @@ defmodule Slidething.Agent.GenServerTest do
     end
   end
 
-describe "start_task/3" do
+  describe "start_task/3" do
     test "transitions to thinking state", %{agent_pid: agent_pid, page_id: page_id} do
       AgentGenServer.start_task(agent_pid, "Create content for page #{page_id}", %{})
 
@@ -77,7 +85,11 @@ describe "start_task/3" do
       assert length(state.messages) > 0
     end
 
-    test "broadcasts task_started event", %{agent_pid: agent_pid, run_id: run_id, page_id: page_id} do
+    test "broadcasts task_started event", %{
+      agent_pid: agent_pid,
+      run_id: run_id,
+      page_id: page_id
+    } do
       Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       AgentGenServer.start_task(agent_pid, "Create content for page #{page_id}", %{})
@@ -87,7 +99,11 @@ describe "start_task/3" do
   end
 
   describe "async LLM pattern" do
-    test "executes tool calls and continues loop", %{agent_pid: agent_pid, run_id: run_id, page_id: page_id} do
+    test "executes tool calls and continues loop", %{
+      agent_pid: agent_pid,
+      run_id: run_id,
+      page_id: page_id
+    } do
       Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       AgentGenServer.start_task(agent_pid, "Create content for page #{page_id}", %{})
@@ -105,7 +121,11 @@ describe "start_task/3" do
       assert_receive {:agent_event, %{event: :completed}}, 2000
     end
 
-    test "llm_response events are JSON-encodable (no tuples in data)", %{agent_pid: agent_pid, run_id: run_id, page_id: page_id} do
+    test "llm_response events are JSON-encodable (no tuples in data)", %{
+      agent_pid: agent_pid,
+      run_id: run_id,
+      page_id: page_id
+    } do
       Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       AgentGenServer.start_task(agent_pid, "Create content for page #{page_id}", %{})
@@ -120,7 +140,11 @@ describe "start_task/3" do
       end
     end
 
-    test "tool calls produce assistant message before tool result", %{agent_pid: agent_pid, run_id: run_id, page_id: page_id} do
+    test "tool calls produce assistant message before tool result", %{
+      agent_pid: agent_pid,
+      run_id: run_id,
+      page_id: page_id
+    } do
       Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
       AgentGenServer.start_task(agent_pid, "Create content for page #{page_id}", %{})
@@ -139,11 +163,11 @@ describe "start_task/3" do
         |> Enum.chunk_every(2, 1, :discard)
         |> Enum.any?(fn
           [%{role: :assistant, tool_calls: calls}, %{role: :tool, tool_results: results}]
-            when not is_nil(calls) and not is_nil(results) ->
-              # The tool_results must carry call_ids matching the tool calls
-              tool_call_ids = Enum.map(calls, & &1.call_id) |> MapSet.new()
-              result_call_ids = Enum.map(results, & &1.call_id) |> MapSet.new()
-              MapSet.equal?(tool_call_ids, result_call_ids)
+          when not is_nil(calls) and not is_nil(results) ->
+            # The tool_results must carry call_ids matching the tool calls
+            tool_call_ids = Enum.map(calls, & &1.call_id) |> MapSet.new()
+            result_call_ids = Enum.map(results, & &1.call_id) |> MapSet.new()
+            MapSet.equal?(tool_call_ids, result_call_ids)
 
           _ ->
             false
@@ -193,33 +217,38 @@ describe "start_task/3" do
         model: "mock-model",
         temperature: 0.7,
         max_tokens: 4000,
-        max_iterations: 1,  # Very low limit
+        # Very low limit
+        max_iterations: 1,
         system_prompt: "Test",
         tools: []
       }
 
-      {:ok, orchestrator} = Task.start(fn -> 
-        receive do
-          msg -> send(self(), {:received, msg})
-        after
-          5000 -> :ok
-        end
-      end)
+      {:ok, orchestrator} =
+        Task.start(fn ->
+          receive do
+            msg -> send(self(), {:received, msg})
+          after
+            5000 -> :ok
+          end
+        end)
 
-      {:ok, agent_pid} = AgentGenServer.start_link(
-        run_id: run_id,
-        agent_type: :content,
-        scope: nil,
-        orchestrator_pid: orchestrator,
-        agent_spec: spec
-      )
+      {:ok, agent_pid} =
+        AgentGenServer.start_link(
+          run_id: run_id,
+          agent_type: :content,
+          scope: nil,
+          orchestrator_pid: orchestrator,
+          agent_spec: spec
+        )
 
       Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
-      
+
       AgentGenServer.start_task(agent_pid, "Test", %{})
-      
+
       # Should fail due to max iterations
-      assert_receive {:agent_event, %{event: :failed, data: %{reason: ":max_iterations_reached"}}}, 2000
+      assert_receive {:agent_event,
+                      %{event: :failed, data: %{reason: ":max_iterations_reached"}}},
+                     2000
     end
   end
 
@@ -240,21 +269,24 @@ describe "start_task/3" do
       }
 
       test_pid = self()
-      {:ok, orchestrator} = Task.start(fn ->
-        receive do
-          msg -> send(test_pid, {:orchestrator_received, msg})
-        after
-          5000 -> :ok
-        end
-      end)
 
-      {:ok, agent_pid} = AgentGenServer.start_link(
-        run_id: run_id,
-        agent_type: :content,
-        scope: {:page, page_id},
-        orchestrator_pid: orchestrator,
-        agent_spec: spec
-      )
+      {:ok, orchestrator} =
+        Task.start(fn ->
+          receive do
+            msg -> send(test_pid, {:orchestrator_received, msg})
+          after
+            5000 -> :ok
+          end
+        end)
+
+      {:ok, agent_pid} =
+        AgentGenServer.start_link(
+          run_id: run_id,
+          agent_type: :content,
+          scope: {:page, page_id},
+          orchestrator_pid: orchestrator,
+          agent_spec: spec
+        )
 
       Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
@@ -267,7 +299,7 @@ describe "start_task/3" do
   describe "state inspection" do
     test "get_state returns full agent state", %{agent_pid: agent_pid, page_id: page_id} do
       state = AgentGenServer.get_state(agent_pid)
-      
+
       assert %AgentGenServer{} = state
       assert state.run_id
       assert state.agent_type == :content

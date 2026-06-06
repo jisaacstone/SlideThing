@@ -8,7 +8,8 @@ defmodule Slidething.Tool.Schemas do
   @schemas %{
     create_book: %{
       name: "create_book",
-      description: "Create a new book with title and metadata. Use this FIRST when generating a new book.",
+      description:
+        "Create a new book with title and metadata. Use this FIRST when generating a new book.",
       parameters: %{
         type: "object",
         properties: %{
@@ -20,18 +21,23 @@ defmodule Slidething.Tool.Schemas do
     },
     create_pages: %{
       name: "create_pages",
-      description: "Create pages for a book. Pass either a count (integer) or a list of page descriptions.",
+      description:
+        "Create pages for a book. Pass either a count (integer) or a list of page descriptions.",
       parameters: %{
         type: "object",
         properties: %{
           book_id: %{type: "string", description: "The book ID to add pages to"},
-          pages: %{type: "array", description: "List of page descriptors, each with position and metadata.description", items: %{
-            type: "object",
-            properties: %{
-              position: %{type: "integer"},
-              metadata: %{type: "object", properties: %{description: %{type: "string"}}}
+          pages: %{
+            type: "array",
+            description: "List of page descriptors, each with position and metadata.description",
+            items: %{
+              type: "object",
+              properties: %{
+                position: %{type: "integer"},
+                metadata: %{type: "object", properties: %{description: %{type: "string"}}}
+              }
             }
-          }}
+          }
         },
         required: ["book_id", "pages"]
       }
@@ -82,13 +88,21 @@ defmodule Slidething.Tool.Schemas do
     },
     create_element: %{
       name: "create_element",
-      description: "Create a new element on a page. Element types: 'title', 'text', 'image', 'caption'.",
+      description:
+        "Create a new element on a page. Element types: 'title', 'text', 'image', 'caption'.",
       parameters: %{
         type: "object",
         properties: %{
           page_id: %{type: "string", description: "The page ID to add the element to"},
-          element_type: %{type: "string", description: "Element type: title, text, image, caption"},
-          content: %{type: "string", description: "The text content (for text/title/caption). For images, use an image prompt description."}
+          element_type: %{
+            type: "string",
+            description: "Element type: title, text, image, caption"
+          },
+          content: %{
+            type: "string",
+            description:
+              "The text content (for text/title/caption). For images, use an image prompt description."
+          }
         },
         required: ["page_id", "element_type", "content"]
       }
@@ -142,12 +156,17 @@ defmodule Slidething.Tool.Schemas do
     },
     generate_image: %{
       name: "generate_image",
-      description: "Generate an image from a prompt at the given aspect ratio. Returns an asset_path stored on disk. Follow with store_asset to attach it to the element.",
+      description:
+        "Generate an image from a prompt at the given aspect ratio. Returns an asset_path stored on disk. Follow with store_asset to attach it to the element.",
       parameters: %{
         type: "object",
         properties: %{
           prompt: %{type: "string", description: "Detailed image generation prompt"},
-          aspect_ratio: %{type: "string", description: "Aspect ratio: one of '1:1', '9:16', '16:9', '3:4', '4:3'. Defaults to 1:1."}
+          aspect_ratio: %{
+            type: "string",
+            description:
+              "Aspect ratio: one of '1:1', '9:16', '16:9', '3:4', '4:3'. Defaults to 1:1."
+          }
         },
         required: ["prompt"]
       }
@@ -167,7 +186,8 @@ defmodule Slidething.Tool.Schemas do
     },
     get_recent_prompts: %{
       name: "get_recent_prompts",
-      description: "Get recent edit prompts for a specific page or element, newest last. Useful for understanding recent changes and intent.",
+      description:
+        "Get recent edit prompts for a specific page or element, newest last. Useful for understanding recent changes and intent.",
       parameters: %{
         type: "object",
         properties: %{
@@ -180,7 +200,8 @@ defmodule Slidething.Tool.Schemas do
     },
     propose_layout: %{
       name: "propose_layout",
-      description: "Persist a layout for a (page, format) pair. element_layouts is an array of {element_id, x, y, width, height}; coordinates are 0..1 fractions of the format dimensions.",
+      description:
+        "Persist a layout for a (page, format) pair. element_layouts is an array of {element_id, x, y, width, height}; coordinates are 0..1 fractions of the format dimensions.",
       parameters: %{
         type: "object",
         properties: %{
@@ -215,7 +236,11 @@ defmodule Slidething.Tool.Schemas do
             type: "object",
             description: "The execution plan with context and phases.",
             properties: %{
-              context: %{type: "string", description: "Optional shared background for all agents: theme, constraints, style notes."},
+              context: %{
+                type: "string",
+                description:
+                  "Optional shared background for all agents: theme, constraints, style notes."
+              },
               phases: %{
                 type: "array",
                 description: "List of phases to execute, with dependency graph.",
@@ -223,13 +248,30 @@ defmodule Slidething.Tool.Schemas do
                   type: "object",
                   properties: %{
                     name: %{type: "string", description: "Unique phase name"},
-                    step_type: %{type: "string", description: "agent | validator | coordinator | planner"},
-                    agent_type: %{type: "string", description: "content | layout | media | validator | coordinator | planner | page_pipeline"},
+                    step_type: %{
+                      type: "string",
+                      description: "agent | validator | coordinator | planner"
+                    },
+                    agent_type: %{
+                      type: "string",
+                      description:
+                        "content | layout | media | validator | coordinator | planner | page_pipeline"
+                    },
                     scope: %{type: "string", description: "book | per_page | per_element"},
-                    depends_on: %{type: "array", items: %{type: "string"}, description: "List of phase names this depends on"},
-                    condition: %{type: ["string", "null"], description: "Condition to gate execution: null or has_layout_issues"},
+                    depends_on: %{
+                      type: "array",
+                      items: %{type: "string"},
+                      description: "List of phase names this depends on"
+                    },
+                    condition: %{
+                      type: ["string", "null"],
+                      description: "Condition to gate execution: null or has_layout_issues"
+                    },
                     max_retries: %{type: "integer", description: "Max retries for this phase"},
-                    context: %{type: "object", description: "Optional context/notes for the agent"}
+                    context: %{
+                      type: "object",
+                      description: "Optional context/notes for the agent"
+                    }
                   },
                   required: ["name", "step_type", "agent_type", "scope", "depends_on"]
                 }

@@ -20,6 +20,7 @@ defmodule Slidething.Agent.JsonSafetyTest do
         orchestrator_pid: self(),
         agent_spec: spec
       )
+
     pid
   end
 

@@ -21,14 +21,15 @@ defmodule Slidething.Agent.InstructionBuilder do
   book_id: current book_id
   """
   def build(phase, scope, user_prompt, phase_context_map, book_id) do
-    parts = [
-      "User request: #{user_prompt}",
-      scope_description(scope, book_id),
-      phase_context(phase, phase_context_map),
-      phase_planner_context(phase)
-    ]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.reject(&(&1 == ""))
+    parts =
+      [
+        "User request: #{user_prompt}",
+        scope_description(scope, book_id),
+        phase_context(phase, phase_context_map),
+        phase_planner_context(phase)
+      ]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.reject(&(&1 == ""))
 
     Enum.join(parts, "\n\n")
   end
@@ -38,15 +39,16 @@ defmodule Slidething.Agent.InstructionBuilder do
   Loads all page elements so the coordinator can review the full book.
   """
   def build_coordinator(phase, user_prompt, phase_context_map, book_id, page_ids) do
-    parts = [
-      "User request: #{user_prompt}",
-      scope_description(:book, book_id),
-      all_pages_summary(page_ids),
-      phase_context(phase, phase_context_map),
-      coordinator_instructions()
-    ]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.reject(&(&1 == ""))
+    parts =
+      [
+        "User request: #{user_prompt}",
+        scope_description(:book, book_id),
+        all_pages_summary(page_ids),
+        phase_context(phase, phase_context_map),
+        coordinator_instructions()
+      ]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.reject(&(&1 == ""))
 
     Enum.join(parts, "\n\n")
   end
@@ -55,13 +57,14 @@ defmodule Slidething.Agent.InstructionBuilder do
   Build instruction for a planner phase (produces context, not content).
   """
   def build_planner(phase, scope, user_prompt, phase_context_map, book_id) do
-    parts = [
-      "User request: #{user_prompt}",
-      planner_scope_description(scope, book_id),
-      phase_context(phase, phase_context_map),
-    ]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.reject(&(&1 == ""))
+    parts =
+      [
+        "User request: #{user_prompt}",
+        planner_scope_description(scope, book_id),
+        phase_context(phase, phase_context_map)
+      ]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.reject(&(&1 == ""))
 
     Enum.join(parts, "\n\n")
   end
@@ -90,17 +93,23 @@ defmodule Slidething.Agent.InstructionBuilder do
 
     elements_desc =
       case Slidething.Element.list(page_id) do
-        [] -> nil
+        [] ->
+          nil
+
         elements ->
-          lines = Enum.map(elements, fn el ->
-            version = el[:latest_version] || %{}
-            content = version[:content] || version["content"] || "(no content)"
-            "  - [#{el.element_type}] #{el.id}: #{String.slice(to_string(content), 0, 80)}"
-          end)
+          lines =
+            Enum.map(elements, fn el ->
+              version = el[:latest_version] || %{}
+              content = version[:content] || version["content"] || "(no content)"
+              "  - [#{el.element_type}] #{el.id}: #{String.slice(to_string(content), 0, 80)}"
+            end)
+
           "Existing elements on page:\n" <> Enum.join(lines, "\n")
       end
 
-    scope_description(:book, book_id) <> "\n" <> base <>
+    scope_description(:book, book_id) <>
+      "\n" <>
+      base <>
       if(elements_desc, do: "\n" <> elements_desc, else: "")
   end
 
@@ -114,14 +123,20 @@ defmodule Slidething.Agent.InstructionBuilder do
           content = version[:content] || version["content"]
           asset_path = version[:asset_path] || version["asset_path"]
           type_line = "Type: #{el.element_type}"
-          content_line = if content, do: "Content: #{String.slice(to_string(content), 0, 200)}", else: nil
+
+          content_line =
+            if content, do: "Content: #{String.slice(to_string(content), 0, 200)}", else: nil
+
           asset_line = if asset_path, do: "Asset path: #{asset_path}", else: nil
           [type_line, content_line, asset_line] |> Enum.reject(&is_nil/1) |> Enum.join("\n")
 
-        _ -> nil
+        _ ->
+          nil
       end
 
-    scope_description(:book, book_id) <> "\n" <> base <>
+    scope_description(:book, book_id) <>
+      "\n" <>
+      base <>
       if(element_desc, do: "\n" <> element_desc, else: "")
   end
 
@@ -144,6 +159,7 @@ defmodule Slidething.Agent.InstructionBuilder do
 
   defp phase_planner_context(%{context: nil}), do: nil
   defp phase_planner_context(%{context: ctx}) when map_size(ctx) == 0, do: nil
+
   defp phase_planner_context(%{context: ctx}) do
     "=== Planner notes for this step ===\n#{Jason.encode!(ctx, pretty: true)}"
   end
@@ -160,7 +176,10 @@ defmodule Slidething.Agent.InstructionBuilder do
             version = el[:latest_version] || %{}
             content = version[:content] || version["content"] || "(empty)"
             asset = version[:asset_path] || version["asset_path"]
-            line = "    [#{el.element_type}] #{el.id}: #{String.slice(to_string(content), 0, 200)}"
+
+            line =
+              "    [#{el.element_type}] #{el.id}: #{String.slice(to_string(content), 0, 200)}"
+
             if asset, do: line <> " (image: #{asset})", else: line
           end)
           |> Enum.join("\n")

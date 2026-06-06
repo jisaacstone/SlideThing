@@ -24,7 +24,9 @@ defmodule Slidething.LLM.Provider.OpenRouter do
   end
 
   defp do_complete(agent_spec, messages, api_key) do
-    base_url = Application.get_env(:slidething, :openrouter_base_url, "https://openrouter.ai/api/v1")
+    base_url =
+      Application.get_env(:slidething, :openrouter_base_url, "https://openrouter.ai/api/v1")
+
     url = "#{base_url}/chat/completions"
 
     body = %{
@@ -40,7 +42,11 @@ defmodule Slidething.LLM.Provider.OpenRouter do
       else
         body
         |> Map.put(:tools, build_openai_tools(agent_spec.tools))
-        |> then(&(if agent_spec.tool_choice, do: Map.put(&1, :tool_choice, agent_spec.tool_choice), else: &1))
+        |> then(
+          &if agent_spec.tool_choice,
+            do: Map.put(&1, :tool_choice, agent_spec.tool_choice),
+            else: &1
+        )
       end
 
     Logger.debug("[OpenRouter] Request: model=#{agent_spec.model}")
@@ -138,7 +144,13 @@ defmodule Slidething.LLM.Provider.OpenRouter do
         case Slidething.Tool.Schemas.get(tool) do
           nil ->
             Logger.warning("[OpenRouter] Unknown tool schema: #{tool}")
-            %{name: to_string(tool), description: "Tool: #{tool}", parameters: %{type: "object", properties: %{}}}
+
+            %{
+              name: to_string(tool),
+              description: "Tool: #{tool}",
+              parameters: %{type: "object", properties: %{}}
+            }
+
           s ->
             s
         end

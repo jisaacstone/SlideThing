@@ -13,7 +13,13 @@ defmodule SlidethingWeb.LayoutController do
     end
   end
 
-  def move_element(conn, %{"page_id" => page_id, "format_id" => format_id, "element_id" => element_id, "x" => x, "y" => y}) do
+  def move_element(conn, %{
+        "page_id" => page_id,
+        "format_id" => format_id,
+        "element_id" => element_id,
+        "x" => x,
+        "y" => y
+      }) do
     case Layout.move_element(page_id, format_id, element_id, x * 1.0, y * 1.0) do
       {:ok, layout} ->
         json(conn, layout)

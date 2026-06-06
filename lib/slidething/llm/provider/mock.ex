@@ -16,61 +16,147 @@ defmodule Slidething.LLM.Provider.Mock do
         "assessment" => "Theme and outline decided"
       }
     }
-    {:tool_requests, [%ToolCall{call_id: "planner_0", tool: :submit_plan, args: %{"plan" => plan}}]}
+
+    {:tool_requests,
+     [%ToolCall{call_id: "planner_0", tool: :submit_plan, args: %{"plan" => plan}}]}
   end
 
   def complete_json(%AgentSpec{name: :planner_decide}, messages) do
     # Decide if context gathering is needed
-    has_existing_book? = Enum.any?(messages, fn msg ->
-      is_binary(msg.content) and String.contains?(msg.content, "Existing book:")
-    end)
+    has_existing_book? =
+      Enum.any?(messages, fn msg ->
+        is_binary(msg.content) and String.contains?(msg.content, "Existing book:")
+      end)
 
     {:final_response, Jason.encode!(%{"needs_context" => has_existing_book?})}
   end
 
   def complete_json(%AgentSpec{name: :planner_gather}, _messages) do
     # Return a summary of gathered context
-    {:final_response, "Book has 3 pages. Pages 1-3 have partial content. Recent prompts show layout and media work needed."}
+    {:final_response,
+     "Book has 3 pages. Pages 1-3 have partial content. Recent prompts show layout and media work needed."}
   end
 
   def complete_json(%AgentSpec{name: :planner_emit}, messages) do
-    existing_book? = Enum.any?(messages, fn msg ->
-      is_binary(msg.content) and String.contains?(msg.content, "Existing book:")
-    end)
+    existing_book? =
+      Enum.any?(messages, fn msg ->
+        is_binary(msg.content) and String.contains?(msg.content, "Existing book:")
+      end)
 
-    plan = if existing_book? do
-      %{
-        "context" => "Edit existing page content and layout",
-        "phases" => [
-          %{"name" => "generate_content", "step_type" => "agent", "agent_type" => "content",
-            "scope" => "per_page", "depends_on" => [], "condition" => nil, "max_retries" => 2, "context" => nil},
-          %{"name" => "generate_layout", "step_type" => "agent", "agent_type" => "layout",
-            "scope" => "per_page", "depends_on" => ["generate_content"], "condition" => nil, "max_retries" => 2, "context" => nil},
-          %{"name" => "generate_media", "step_type" => "agent", "agent_type" => "media",
-            "scope" => "per_element", "depends_on" => ["generate_layout"], "condition" => nil, "max_retries" => 2, "context" => nil},
-          %{"name" => "validate_layout", "step_type" => "validator", "agent_type" => "validator",
-            "scope" => "per_page", "depends_on" => ["generate_layout"], "condition" => nil, "max_retries" => 1, "context" => nil},
-          %{"name" => "repair_layout", "step_type" => "agent", "agent_type" => "layout",
-            "scope" => "per_page", "depends_on" => ["validate_layout"], "condition" => "has_layout_issues", "max_retries" => 2, "context" => nil}
-        ]
-      }
-    else
-      %{
-        "context" => "Create new book with semantic phases",
-        "phases" => [
-          %{"name" => "decide_theme", "step_type" => "planner", "agent_type" => "planner",
-            "scope" => "book", "depends_on" => [], "condition" => nil, "max_retries" => 1, "context" => nil},
-          %{"name" => "assign_outline", "step_type" => "planner", "agent_type" => "planner",
-            "scope" => "book", "depends_on" => ["decide_theme"], "condition" => nil, "max_retries" => 1, "context" => nil},
-          %{"name" => "process_pages", "step_type" => "agent", "agent_type" => "page_pipeline",
-            "scope" => "per_page", "depends_on" => ["assign_outline"], "condition" => nil, "max_retries" => 2, "context" => nil},
-          %{"name" => "review_book", "step_type" => "coordinator", "agent_type" => "coordinator",
-            "scope" => "book", "depends_on" => ["process_pages"], "condition" => nil, "max_retries" => 1, "context" => nil},
-          %{"name" => "validate_book", "step_type" => "validator", "agent_type" => "validator",
-            "scope" => "per_page", "depends_on" => ["review_book"], "condition" => nil, "max_retries" => 1, "context" => nil}
-        ]
-      }
-    end
+    plan =
+      if existing_book? do
+        %{
+          "context" => "Edit existing page content and layout",
+          "phases" => [
+            %{
+              "name" => "generate_content",
+              "step_type" => "agent",
+              "agent_type" => "content",
+              "scope" => "per_page",
+              "depends_on" => [],
+              "condition" => nil,
+              "max_retries" => 2,
+              "context" => nil
+            },
+            %{
+              "name" => "generate_layout",
+              "step_type" => "agent",
+              "agent_type" => "layout",
+              "scope" => "per_page",
+              "depends_on" => ["generate_content"],
+              "condition" => nil,
+              "max_retries" => 2,
+              "context" => nil
+            },
+            %{
+              "name" => "generate_media",
+              "step_type" => "agent",
+              "agent_type" => "media",
+              "scope" => "per_element",
+              "depends_on" => ["generate_layout"],
+              "condition" => nil,
+              "max_retries" => 2,
+              "context" => nil
+            },
+            %{
+              "name" => "validate_layout",
+              "step_type" => "validator",
+              "agent_type" => "validator",
+              "scope" => "per_page",
+              "depends_on" => ["generate_layout"],
+              "condition" => nil,
+              "max_retries" => 1,
+              "context" => nil
+            },
+            %{
+              "name" => "repair_layout",
+              "step_type" => "agent",
+              "agent_type" => "layout",
+              "scope" => "per_page",
+              "depends_on" => ["validate_layout"],
+              "condition" => "has_layout_issues",
+              "max_retries" => 2,
+              "context" => nil
+            }
+          ]
+        }
+      else
+        %{
+          "context" => "Create new book with semantic phases",
+          "phases" => [
+            %{
+              "name" => "decide_theme",
+              "step_type" => "planner",
+              "agent_type" => "planner",
+              "scope" => "book",
+              "depends_on" => [],
+              "condition" => nil,
+              "max_retries" => 1,
+              "context" => nil
+            },
+            %{
+              "name" => "assign_outline",
+              "step_type" => "planner",
+              "agent_type" => "planner",
+              "scope" => "book",
+              "depends_on" => ["decide_theme"],
+              "condition" => nil,
+              "max_retries" => 1,
+              "context" => nil
+            },
+            %{
+              "name" => "process_pages",
+              "step_type" => "agent",
+              "agent_type" => "page_pipeline",
+              "scope" => "per_page",
+              "depends_on" => ["assign_outline"],
+              "condition" => nil,
+              "max_retries" => 2,
+              "context" => nil
+            },
+            %{
+              "name" => "review_book",
+              "step_type" => "coordinator",
+              "agent_type" => "coordinator",
+              "scope" => "book",
+              "depends_on" => ["process_pages"],
+              "condition" => nil,
+              "max_retries" => 1,
+              "context" => nil
+            },
+            %{
+              "name" => "validate_book",
+              "step_type" => "validator",
+              "agent_type" => "validator",
+              "scope" => "per_page",
+              "depends_on" => ["review_book"],
+              "condition" => nil,
+              "max_retries" => 1,
+              "context" => nil
+            }
+          ]
+        }
+      end
 
     {:tool_requests, [%ToolCall{call_id: "emit_0", tool: :submit_plan, args: %{"plan" => plan}}]}
   end
@@ -88,6 +174,7 @@ defmodule Slidething.LLM.Provider.Mock do
             "element_id" => existing_image_id,
             "content" => "Vibrant fox in forest with sunset colors"
           })
+
         _ ->
           {:final_response, "Page complete for #{page_id}"}
       end
@@ -112,8 +199,20 @@ defmodule Slidething.LLM.Provider.Mock do
             "page_id" => page_id || "page-unknown",
             "format_id" => "format-web",
             "element_layouts" => [
-              %{"element_id" => "title-placeholder", "x" => 0.1, "y" => 0.05, "width" => 0.8, "height" => 0.1},
-              %{"element_id" => "text-placeholder",  "x" => 0.1, "y" => 0.18, "width" => 0.8, "height" => 0.3}
+              %{
+                "element_id" => "title-placeholder",
+                "x" => 0.1,
+                "y" => 0.05,
+                "width" => 0.8,
+                "height" => 0.1
+              },
+              %{
+                "element_id" => "text-placeholder",
+                "x" => 0.1,
+                "y" => 0.18,
+                "width" => 0.8,
+                "height" => 0.3
+              }
             ]
           })
 
@@ -132,7 +231,8 @@ defmodule Slidething.LLM.Provider.Mock do
   def complete_json(%AgentSpec{name: :coordinator}, _messages) do
     result = %{
       "context" => %{
-        "assessment" => "Book content looks coherent. Tone and character are consistent across pages.",
+        "assessment" =>
+          "Book content looks coherent. Tone and character are consistent across pages.",
         "issues_found" => []
       },
       "plan_patches" => []
@@ -287,7 +387,6 @@ defmodule Slidething.LLM.Provider.Mock do
     end)
   end
 
-
   defp extract_page_scope(messages) do
     messages
     |> Enum.find_value(fn
@@ -296,7 +395,9 @@ defmodule Slidething.LLM.Provider.Mock do
           [_, pid] -> {:page, pid}
           nil -> nil
         end
-      _ -> nil
+
+      _ ->
+        nil
     end)
   end
 
@@ -371,6 +472,7 @@ defmodule Slidething.LLM.Provider.Mock do
 
   defp extract_existing_image_id(messages) do
     content = extract_user_content(messages) || ""
+
     case Regex.run(~r/\[image\] (elem_[a-z0-9_-]+)/, content) do
       [_, id] -> id
       _ -> nil
@@ -387,5 +489,4 @@ defmodule Slidething.LLM.Provider.Mock do
       _ -> nil
     end
   end
-
 end

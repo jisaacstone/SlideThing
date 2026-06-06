@@ -22,16 +22,19 @@ defmodule SlidethingWeb.PageController do
           if layouts == [] do
             case Book.get_formats(page.book_id) do
               [format | _] ->
-                [%{
-                  id: nil,
-                  page_id: page_id,
-                  format_id: format.id,
-                  version: 0,
-                  run_id: nil,
-                  element_layouts: [],
-                  created_at: nil,
-                  format: format
-                }]
+                [
+                  %{
+                    id: nil,
+                    page_id: page_id,
+                    format_id: format.id,
+                    version: 0,
+                    run_id: nil,
+                    element_layouts: [],
+                    created_at: nil,
+                    format: format
+                  }
+                ]
+
               _ ->
                 []
             end

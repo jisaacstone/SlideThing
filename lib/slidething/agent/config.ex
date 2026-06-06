@@ -119,7 +119,15 @@ defmodule Slidething.Agent.Config do
       %__MODULE__{config_path: config_path, agents: spec_map}
     else
       override = read_and_parse(config_path)
-      defaults = Map.take(override, ["default_provider", "default_model", "default_image_provider", "default_image_model"])
+
+      defaults =
+        Map.take(override, [
+          "default_provider",
+          "default_model",
+          "default_image_provider",
+          "default_image_model"
+        ])
+
       override_agents = override["agents"] || %{}
       merged = merge_overrides(spec_map, defaults, override_agents)
       %__MODULE__{config_path: config_path, agents: merged}
@@ -130,10 +138,29 @@ defmodule Slidething.Agent.Config do
     Map.new(spec_map, fn {name, spec} ->
       overrides = override_agents[Atom.to_string(name)] || %{}
 
-      provider = override_field(overrides, "provider", override_field(defaults, "default_provider", spec.provider))
-      model = override_field(overrides, "model", override_field(defaults, "default_model", spec.model))
-      image_provider = override_field(overrides, "image_provider", override_field(defaults, "default_image_provider", spec.image_provider))
-      image_model = override_field(overrides, "image_model", override_field(defaults, "default_image_model", spec.image_model))
+      provider =
+        override_field(
+          overrides,
+          "provider",
+          override_field(defaults, "default_provider", spec.provider)
+        )
+
+      model =
+        override_field(overrides, "model", override_field(defaults, "default_model", spec.model))
+
+      image_provider =
+        override_field(
+          overrides,
+          "image_provider",
+          override_field(defaults, "default_image_provider", spec.image_provider)
+        )
+
+      image_model =
+        override_field(
+          overrides,
+          "image_model",
+          override_field(defaults, "default_image_model", spec.image_model)
+        )
 
       {name,
        %{

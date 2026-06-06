@@ -7,6 +7,7 @@ defmodule Slidething.Agent.API do
 
   alias Slidething.Agent.Orchestrator
   alias Slidething.Agent.GenServer, as: AgentGenServer
+
   @doc """
   Start a new agent run.
 
@@ -67,8 +68,7 @@ defmodule Slidething.Agent.API do
   """
   def get_agents(run_id) do
     Registry.select(Slidething.AgentRegistry, [
-      {{{:"$1", :"$2", :"$3"}, :"$4", :_}, [{:==, :"$1", run_id}],
-       [{{:"$2", :"$3", :"$4"}}]}
+      {{{:"$1", :"$2", :"$3"}, :"$4", :_}, [{:==, :"$1", run_id}], [{{:"$2", :"$3", :"$4"}}]}
     ])
   end
 
@@ -109,5 +109,4 @@ defmodule Slidething.Agent.API do
       {{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}
     ])
   end
-
 end

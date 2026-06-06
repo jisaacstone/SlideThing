@@ -55,7 +55,9 @@ defmodule Slidething.Agent.OrchestratorTest do
 
     test "broadcasts :phase_started for initial planning", %{orchestrator_pid: pid} do
       Orchestrator.start_run(pid, "Test", nil)
-      assert_receive {:run_event, %{event: :phase_started, data: %{phase: :initial_planning}}}, 2_000
+
+      assert_receive {:run_event, %{event: :phase_started, data: %{phase: :initial_planning}}},
+                     2_000
     end
   end
 
@@ -127,7 +129,8 @@ defmodule Slidething.Agent.OrchestratorTest do
   end
 
   describe "event stream" do
-    test "event stream includes :started, :planning_complete, :phase_started, :phase_completed, :completed", %{orchestrator_pid: pid} do
+    test "event stream includes :started, :planning_complete, :phase_started, :phase_completed, :completed",
+         %{orchestrator_pid: pid} do
       Orchestrator.start_run(pid, "Create a book", nil)
 
       events =

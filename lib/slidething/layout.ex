@@ -78,8 +78,22 @@ defmodule Slidething.Layout do
       )
 
     rows =
-      Enum.map(result.rows, fn [id, pid, fid, version, run_id, layouts_json, created,
-                                 fname, unit, width, height, dpi, safe_margin_mm, bleed_mm] ->
+      Enum.map(result.rows, fn [
+                                 id,
+                                 pid,
+                                 fid,
+                                 version,
+                                 run_id,
+                                 layouts_json,
+                                 created,
+                                 fname,
+                                 unit,
+                                 width,
+                                 height,
+                                 dpi,
+                                 safe_margin_mm,
+                                 bleed_mm
+                               ] ->
         %{
           id: id,
           page_id: pid,

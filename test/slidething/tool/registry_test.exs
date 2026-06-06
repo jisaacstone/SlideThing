@@ -11,7 +11,11 @@ defmodule Slidething.Tool.RegistryTest do
 
   describe "create_book" do
     test "creates a book and returns success", %{book_id: _book_id} do
-      result = Slidething.Tool.Registry.execute(:create_book, %{"title" => "My Story", "metadata" => %{"theme" => "adventure"}})
+      result =
+        Slidething.Tool.Registry.execute(:create_book, %{
+          "title" => "My Story",
+          "metadata" => %{"theme" => "adventure"}
+        })
 
       assert %ToolResult{success: true, tool: :create_book} = result
       assert is_binary(result.data.book_id)
@@ -34,7 +38,8 @@ defmodule Slidething.Tool.RegistryTest do
         %{"position" => 2, "metadata" => %{"desc" => "Page 2"}}
       ]
 
-      result = Slidething.Tool.Registry.execute(:create_pages, %{"book_id" => book_id, "pages" => pages})
+      result =
+        Slidething.Tool.Registry.execute(:create_pages, %{"book_id" => book_id, "pages" => pages})
 
       assert %ToolResult{success: true} = result
       assert result.data.count == 2
@@ -42,7 +47,8 @@ defmodule Slidething.Tool.RegistryTest do
     end
 
     test "creates pages by count", %{book_id: book_id} do
-      result = Slidething.Tool.Registry.execute(:create_pages, %{"book_id" => book_id, "count" => 3})
+      result =
+        Slidething.Tool.Registry.execute(:create_pages, %{"book_id" => book_id, "count" => 3})
 
       assert %ToolResult{success: true} = result
       assert result.data.count == 3
@@ -79,11 +85,12 @@ defmodule Slidething.Tool.RegistryTest do
 
   describe "create_element" do
     test "creates a title element", %{page_id: page_id} do
-      result = Slidething.Tool.Registry.execute(:create_element, %{
-        "page_id" => page_id,
-        "element_type" => "title",
-        "content" => "My Title"
-      })
+      result =
+        Slidething.Tool.Registry.execute(:create_element, %{
+          "page_id" => page_id,
+          "element_type" => "title",
+          "content" => "My Title"
+        })
 
       assert %ToolResult{success: true} = result
       assert result.data.element_type == "title"
@@ -92,11 +99,12 @@ defmodule Slidething.Tool.RegistryTest do
     end
 
     test "creates a text element", %{page_id: page_id} do
-      result = Slidething.Tool.Registry.execute(:create_element, %{
-        "page_id" => page_id,
-        "element_type" => "text",
-        "content" => "Once upon a time..."
-      })
+      result =
+        Slidething.Tool.Registry.execute(:create_element, %{
+          "page_id" => page_id,
+          "element_type" => "text",
+          "content" => "Once upon a time..."
+        })
 
       assert %ToolResult{success: true} = result
       assert result.data.element_type == "text"
@@ -106,7 +114,9 @@ defmodule Slidething.Tool.RegistryTest do
   describe "get_page_elements" do
     test "lists elements on a page", %{page_id: page_id} do
       Slidething.Tool.Registry.execute(:create_element, %{
-        "page_id" => page_id, "element_type" => "title", "content" => "Title"
+        "page_id" => page_id,
+        "element_type" => "title",
+        "content" => "Title"
       })
 
       result = Slidething.Tool.Registry.execute(:get_page_elements, %{"page_id" => page_id})
@@ -129,10 +139,11 @@ defmodule Slidething.Tool.RegistryTest do
       {:ok, elem} = Slidething.Element.create(page_id, "text", "Original")
       element_id = elem.element_id
 
-      result = Slidething.Tool.Registry.execute(:update_element, %{
-        "element_id" => element_id,
-        "content" => "Updated"
-      })
+      result =
+        Slidething.Tool.Registry.execute(:update_element, %{
+          "element_id" => element_id,
+          "content" => "Updated"
+        })
 
       assert %ToolResult{success: true} = result
       assert result.data.content == "Updated"
@@ -140,10 +151,11 @@ defmodule Slidething.Tool.RegistryTest do
     end
 
     test "fails for nonexistent element" do
-      result = Slidething.Tool.Registry.execute(:update_element, %{
-        "element_id" => "elem_nonexistent",
-        "content" => "Test"
-      })
+      result =
+        Slidething.Tool.Registry.execute(:update_element, %{
+          "element_id" => "elem_nonexistent",
+          "content" => "Test"
+        })
 
       assert %ToolResult{success: false} = result
       assert String.contains?(result.error, "not_found")
@@ -152,10 +164,11 @@ defmodule Slidething.Tool.RegistryTest do
 
   describe "update_book_metadata" do
     test "updates book-level metadata", %{book_id: book_id} do
-      result = Slidething.Tool.Registry.execute(:update_book_metadata, %{
-        "book_id" => book_id,
-        "metadata" => %{"theme" => "friendship"}
-      })
+      result =
+        Slidething.Tool.Registry.execute(:update_book_metadata, %{
+          "book_id" => book_id,
+          "metadata" => %{"theme" => "friendship"}
+        })
 
       assert %ToolResult{success: true} = result
       assert result.data.updated == book_id
@@ -164,10 +177,11 @@ defmodule Slidething.Tool.RegistryTest do
 
   describe "update_page_metadata" do
     test "updates page-level metadata", %{page_id: page_id} do
-      result = Slidething.Tool.Registry.execute(:update_page_metadata, %{
-        "page_id" => page_id,
-        "metadata" => %{"status" => "complete"}
-      })
+      result =
+        Slidething.Tool.Registry.execute(:update_page_metadata, %{
+          "page_id" => page_id,
+          "metadata" => %{"status" => "complete"}
+        })
 
       assert %ToolResult{success: true} = result
       assert result.data.updated == page_id
@@ -192,9 +206,10 @@ defmodule Slidething.Tool.RegistryTest do
 
   describe "generate_image" do
     test "stores a mock image and returns its asset_path" do
-      result = Slidething.Tool.Registry.execute(:generate_image, %{
-        "prompt" => "A penguin flying"
-      })
+      result =
+        Slidething.Tool.Registry.execute(:generate_image, %{
+          "prompt" => "A penguin flying"
+        })
 
       assert %ToolResult{success: true} = result
       assert result.data.prompt == "A penguin flying"
@@ -205,9 +220,11 @@ defmodule Slidething.Tool.RegistryTest do
     end
 
     test "respects custom aspect_ratio" do
-      result = Slidething.Tool.Registry.execute(:generate_image, %{
-        "prompt" => "Test", "aspect_ratio" => "16:9"
-      })
+      result =
+        Slidething.Tool.Registry.execute(:generate_image, %{
+          "prompt" => "Test",
+          "aspect_ratio" => "16:9"
+        })
 
       assert %ToolResult{success: true} = result
       assert result.data.aspect_ratio == "16:9"
@@ -218,11 +235,12 @@ defmodule Slidething.Tool.RegistryTest do
     test "attaches asset to element as a new version", %{page_id: page_id} do
       {:ok, elem} = Slidething.Element.create(page_id, "image", "a duck")
 
-      result = Slidething.Tool.Registry.execute(:store_asset, %{
-        "element_id" => elem.element_id,
-        "asset_path" => "abc.png",
-        "prompt" => "a duck swimming"
-      })
+      result =
+        Slidething.Tool.Registry.execute(:store_asset, %{
+          "element_id" => elem.element_id,
+          "asset_path" => "abc.png",
+          "prompt" => "a duck swimming"
+        })
 
       assert %ToolResult{success: true} = result
       assert result.data.version == 2
@@ -238,14 +256,27 @@ defmodule Slidething.Tool.RegistryTest do
       {:ok, e1} = Slidething.Element.create(page_id, "title", "Hello")
       {:ok, e2} = Slidething.Element.create(page_id, "image", "duck prompt")
 
-      result = Slidething.Tool.Registry.execute(:propose_layout, %{
-        "page_id" => page_id,
-        "format_id" => "format-web",
-        "element_layouts" => [
-          %{"element_id" => e1.element_id, "x" => 0.1, "y" => 0.1, "width" => 0.8, "height" => 0.1},
-          %{"element_id" => e2.element_id, "x" => 0.1, "y" => 0.3, "width" => 0.8, "height" => 0.6}
-        ]
-      })
+      result =
+        Slidething.Tool.Registry.execute(:propose_layout, %{
+          "page_id" => page_id,
+          "format_id" => "format-web",
+          "element_layouts" => [
+            %{
+              "element_id" => e1.element_id,
+              "x" => 0.1,
+              "y" => 0.1,
+              "width" => 0.8,
+              "height" => 0.1
+            },
+            %{
+              "element_id" => e2.element_id,
+              "x" => 0.1,
+              "y" => 0.3,
+              "width" => 0.8,
+              "height" => 0.6
+            }
+          ]
+        })
 
       assert %ToolResult{success: true} = result
       assert result.data.version == 1

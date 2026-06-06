@@ -35,6 +35,7 @@ defmodule Slidething.Agent.OrchestratorLayoutMediaTest do
       case Slidething.Layout.get_latest(page.id, "format-web") do
         {:ok, layout} ->
           assert is_list(layout.element_layouts)
+
         _ ->
           # Acceptable if mock skipped layout (no elements on page)
           :ok

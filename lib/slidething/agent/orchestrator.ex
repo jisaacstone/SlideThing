@@ -28,6 +28,7 @@ defmodule Slidething.Agent.Orchestrator do
     SubagentTask,
     ToolCall
   }
+
   alias Slidething.Agent.GenServer, as: AgentGenServer
 
   @default_format_id "format-web"
@@ -119,7 +120,8 @@ defmodule Slidething.Agent.Orchestrator do
   def handle_call({:start_run, prompt, book_id, target_type, target_id}, _from, state) do
     Logger.info("[Orchestrator] Starting run #{state.run_id}")
 
-    new_state = %{state
+    new_state = %{
+      state
       | prompt: prompt,
         book_id: book_id,
         target_type: target_type,
@@ -129,7 +131,13 @@ defmodule Slidething.Agent.Orchestrator do
 
     broadcast_event(new_state, :started, %{prompt: prompt, book_id: book_id})
     ref = call_planner(new_state)
-    new_state = %{new_state | pending_llm_tasks: Map.put(new_state.pending_llm_tasks, ref, {:planner, :initial_planning})}
+
+    new_state = %{
+      new_state
+      | pending_llm_tasks:
+          Map.put(new_state.pending_llm_tasks, ref, {:planner, :initial_planning})
+    }
+
     {:reply, :ok, new_state}
   end
 
@@ -187,7 +195,8 @@ defmodule Slidething.Agent.Orchestrator do
         if no_pending_agents_for_phase?(new_state, phase_name) do
           Logger.info("[Orchestrator] Phase '#{phase_name}' all agents done")
 
-          finished = %{new_state
+          finished = %{
+            new_state
             | completed_phases: MapSet.put(new_state.completed_phases, phase_name),
               running_phases: MapSet.delete(new_state.running_phases, phase_name)
           }
@@ -227,19 +236,26 @@ defmodule Slidething.Agent.Orchestrator do
 
       {{_step_type, phase_name}, pending} ->
         Logger.error("[Orchestrator] LLM task '#{phase_name}' crashed: #{inspect(reason)}")
-        fail_run(%{state | pending_llm_tasks: pending}, "'#{phase_name}' crashed: #{inspect(reason)}")
+
+        fail_run(
+          %{state | pending_llm_tasks: pending},
+          "'#{phase_name}' crashed: #{inspect(reason)}"
+        )
     end
   end
 
   # Initial planner result (status: :planning)
   defp handle_planner_result(%{status: :planning} = state, _phase_name, plan_json) do
     Logger.debug("[Planner] Emit result: #{inspect(plan_json, limit: 5000)}")
+
     case parse_and_validate_plan(plan_json) do
       {:ok, plan} ->
         Logger.debug("[Planner] Phases: #{inspect(Enum.map(plan.phases, & &1.name))}")
+
         case setup_pages_for_plan(plan, state) do
           {:ok, book_id, page_ids} ->
-            new_state = %{state
+            new_state = %{
+              state
               | generated_plan: plan,
                 book_id: book_id,
                 page_ids: page_ids,
@@ -273,7 +289,8 @@ defmodule Slidething.Agent.Orchestrator do
       data: parse_json_loosely(plan_json)
     }
 
-    new_state = %{state
+    new_state = %{
+      state
       | phase_context: Map.put(state.phase_context, phase_name, ctx),
         completed_phases: MapSet.put(state.completed_phases, phase_name),
         running_phases: MapSet.delete(state.running_phases, phase_name)
@@ -284,7 +301,10 @@ defmodule Slidething.Agent.Orchestrator do
   end
 
   defp handle_planner_result(state, phase_name, _plan_json) do
-    Logger.warning("[Orchestrator] Unexpected planner result in status #{state.status} for phase #{phase_name}")
+    Logger.warning(
+      "[Orchestrator] Unexpected planner result in status #{state.status} for phase #{phase_name}"
+    )
+
     {:noreply, state}
   end
 
@@ -297,7 +317,8 @@ defmodule Slidething.Agent.Orchestrator do
     ctx_data = Map.get(parsed, "context", parsed)
     ctx = %PlanContext{phase_name: phase_name, scope: :book, data: ctx_data}
 
-    state = %{state
+    state = %{
+      state
       | phase_context: Map.put(state.phase_context, phase_name, ctx),
         completed_phases: MapSet.put(state.completed_phases, phase_name),
         running_phases: MapSet.delete(state.running_phases, phase_name)
@@ -306,17 +327,21 @@ defmodule Slidething.Agent.Orchestrator do
     broadcast_event(state, :phase_completed, %{phase: phase_name})
 
     # Apply plan_patches if present
-    patches = case Map.get(parsed, "plan_patches") do
-      list when is_list(list) -> list
-      _ -> []
-    end
+    patches =
+      case Map.get(parsed, "plan_patches") do
+        list when is_list(list) -> list
+        _ -> []
+      end
 
-    state = case apply_plan_patches(state, phase_name, patches) do
-      {:ok, new_state} -> new_state
-      {:error, reason} ->
-        Logger.warning("[Orchestrator] Patches from '#{phase_name}' rejected: #{reason}")
-        state
-    end
+    state =
+      case apply_plan_patches(state, phase_name, patches) do
+        {:ok, new_state} ->
+          new_state
+
+        {:error, reason} ->
+          Logger.warning("[Orchestrator] Patches from '#{phase_name}' rejected: #{reason}")
+          state
+      end
 
     schedule_next_phases(state)
   end
@@ -325,7 +350,10 @@ defmodule Slidething.Agent.Orchestrator do
 
   defp apply_plan_patches(state, phase_name, patches) do
     if state.coordinator_rounds >= @max_coordinator_rounds do
-      Logger.warning("[Orchestrator] Max coordinator rounds (#{@max_coordinator_rounds}) reached — ignoring #{length(patches)} patch(es) from '#{phase_name}'")
+      Logger.warning(
+        "[Orchestrator] Max coordinator rounds (#{@max_coordinator_rounds}) reached — ignoring #{length(patches)} patch(es) from '#{phase_name}'"
+      )
+
       {:ok, state}
     else
       case PlanPatcher.apply(state.generated_plan.phases, patches, state.completed_phases) do
@@ -333,9 +361,23 @@ defmodule Slidething.Agent.Orchestrator do
           try do
             :ok = PlanValidator.validate_plan!(new_phases)
             new_plan = %{state.generated_plan | phases: new_phases}
-            new_state = %{state | generated_plan: new_plan, coordinator_rounds: state.coordinator_rounds + 1}
-            Logger.info("[Orchestrator] Applied #{length(patches)} patch(es) from '#{phase_name}' (coordinator round #{new_state.coordinator_rounds})")
-            broadcast_event(new_state, :plan_patched, %{phase: phase_name, patch_count: length(patches), round: new_state.coordinator_rounds})
+
+            new_state = %{
+              state
+              | generated_plan: new_plan,
+                coordinator_rounds: state.coordinator_rounds + 1
+            }
+
+            Logger.info(
+              "[Orchestrator] Applied #{length(patches)} patch(es) from '#{phase_name}' (coordinator round #{new_state.coordinator_rounds})"
+            )
+
+            broadcast_event(new_state, :plan_patched, %{
+              phase: phase_name,
+              patch_count: length(patches),
+              round: new_state.coordinator_rounds
+            })
+
             {:ok, new_state}
           rescue
             e -> {:error, "patched plan failed validation: #{Exception.message(e)}"}
@@ -351,11 +393,14 @@ defmodule Slidething.Agent.Orchestrator do
 
   defp schedule_next_phases(state) do
     phases = state.generated_plan.phases
-    ready = PlanExecutor.find_ready_phases(phases, state.completed_phases, state.running_phases, state)
+
+    ready =
+      PlanExecutor.find_ready_phases(phases, state.completed_phases, state.running_phases, state)
 
     cond do
       ready != [] ->
         new_state = Enum.reduce(ready, state, &execute_phase(&2, &1))
+
         # Synchronous phases (validator) complete immediately — re-check in case more phases are ready
         if all_sync?(ready) do
           schedule_next_phases(new_state)
@@ -376,20 +421,28 @@ defmodule Slidething.Agent.Orchestrator do
 
   defp execute_phase(state, %Phase{step_type: :planner} = phase) do
     Logger.info("[Orchestrator] Starting planner step '#{phase.name}'")
-    instruction = InstructionBuilder.build_planner(
-      phase, :book, state.prompt, state.phase_context, state.book_id
-    )
+
+    instruction =
+      InstructionBuilder.build_planner(
+        phase,
+        :book,
+        state.prompt,
+        state.phase_context,
+        state.book_id
+      )
 
     planner_spec = Slidething.Agent.Config.agent_spec(:planner)
 
-    task = Task.Supervisor.async_nolink(Slidething.IOTaskSupervisor, fn ->
-      run_planner_step_loop(planner_spec, [
-        %Message{role: :system, content: planner_spec.system_prompt},
-        %Message{role: :user, content: instruction}
-      ])
-    end)
+    task =
+      Task.Supervisor.async_nolink(Slidething.IOTaskSupervisor, fn ->
+        run_planner_step_loop(planner_spec, [
+          %Message{role: :system, content: planner_spec.system_prompt},
+          %Message{role: :user, content: instruction}
+        ])
+      end)
 
-    %{state
+    %{
+      state
       | running_phases: MapSet.put(state.running_phases, phase.name),
         pending_llm_tasks: Map.put(state.pending_llm_tasks, task.ref, {:planner, phase.name})
     }
@@ -399,20 +452,27 @@ defmodule Slidething.Agent.Orchestrator do
     Logger.info("[Orchestrator] Starting coordinator step '#{phase.name}'")
     broadcast_event(state, :phase_started, %{phase: phase.name, step_type: :coordinator})
 
-    instruction = InstructionBuilder.build_coordinator(
-      phase, state.prompt, state.phase_context, state.book_id, state.page_ids
-    )
+    instruction =
+      InstructionBuilder.build_coordinator(
+        phase,
+        state.prompt,
+        state.phase_context,
+        state.book_id,
+        state.page_ids
+      )
 
     coordinator_spec = Slidething.Agent.Config.agent_spec(:coordinator)
 
-    task = Task.Supervisor.async_nolink(Slidething.IOTaskSupervisor, fn ->
-      Slidething.LLM.Client.complete_json(coordinator_spec, [
-        %Slidething.Agent.Message{role: :system, content: coordinator_spec.system_prompt},
-        %Slidething.Agent.Message{role: :user, content: instruction}
-      ])
-    end)
+    task =
+      Task.Supervisor.async_nolink(Slidething.IOTaskSupervisor, fn ->
+        Slidething.LLM.Client.complete_json(coordinator_spec, [
+          %Slidething.Agent.Message{role: :system, content: coordinator_spec.system_prompt},
+          %Slidething.Agent.Message{role: :user, content: instruction}
+        ])
+      end)
 
-    %{state
+    %{
+      state
       | running_phases: MapSet.put(state.running_phases, phase.name),
         pending_llm_tasks: Map.put(state.pending_llm_tasks, task.ref, {:coordinator, phase.name})
     }
@@ -423,18 +483,23 @@ defmodule Slidething.Agent.Orchestrator do
     broadcast_event(state, :phase_started, %{phase: phase.name, step_type: :validator})
 
     page_ids = scoped_page_ids(phase.scope, state)
-    issues = Enum.flat_map(page_ids, &Slidething.Validator.Layout.validate(&1, @default_format_id))
+
+    issues =
+      Enum.flat_map(page_ids, &Slidething.Validator.Layout.validate(&1, @default_format_id))
+
     issue_maps = Enum.map(issues, &issue_to_map/1)
 
     if issue_maps != [] do
       broadcast_event(state, :validation_issues, %{phase: phase.name, issues: issue_maps})
     end
 
-    new_state = %{state
+    new_state = %{
+      state
       | validation_issues: Map.put(state.validation_issues, phase.name, issue_maps),
         completed_phases: MapSet.put(state.completed_phases, phase.name),
         running_phases: MapSet.delete(state.running_phases, phase.name)
     }
+
     broadcast_event(new_state, :phase_completed, %{phase: phase.name})
     new_state
   end
@@ -450,12 +515,19 @@ defmodule Slidething.Agent.Orchestrator do
       Enum.reduce(tasks, state.pending_agents, fn task, acc ->
         case start_agent(state.run_id, phase.name, task.agent, task.scope, agent_spec) do
           {:ok, pid} ->
-            context = %{scope: AgentGenServer.scope_to_json(task.scope), task_count: length(tasks)}
+            context = %{
+              scope: AgentGenServer.scope_to_json(task.scope),
+              task_count: length(tasks)
+            }
+
             AgentGenServer.start_task(pid, task.instruction, context)
             Map.put(acc, pid, {phase.name, task.scope})
 
           {:error, reason} ->
-            Logger.error("[Orchestrator] Failed to start agent for phase '#{phase.name}': #{inspect(reason)}")
+            Logger.error(
+              "[Orchestrator] Failed to start agent for phase '#{phase.name}': #{inspect(reason)}"
+            )
+
             acc
         end
       end)
@@ -466,9 +538,7 @@ defmodule Slidething.Agent.Orchestrator do
       tasks == [] ->
         # No tasks for this phase (e.g., per_element with no elements) — mark complete
         Logger.info("[Orchestrator] Phase '#{phase.name}' has no tasks — skipping")
-        %{state
-          | completed_phases: MapSet.put(state.completed_phases, phase.name)
-        }
+        %{state | completed_phases: MapSet.put(state.completed_phases, phase.name)}
 
       started_count == 0 ->
         # All starts failed
@@ -477,7 +547,8 @@ defmodule Slidething.Agent.Orchestrator do
         state
 
       true ->
-        %{state
+        %{
+          state
           | pending_agents: pending,
             running_phases: MapSet.put(state.running_phases, phase.name)
         }
@@ -487,18 +558,23 @@ defmodule Slidething.Agent.Orchestrator do
   # ── Task building ──────────────────────────────────────────────────────────
 
   defp build_tasks_for_phase(%Phase{scope: :book} = phase, state) do
-    [%SubagentTask{
-      agent: phase.agent_type,
-      scope: :book,
-      phase_name: phase.name,
-      instruction: InstructionBuilder.build(phase, :book, state.prompt, state.phase_context, state.book_id)
-    }]
+    [
+      %SubagentTask{
+        agent: phase.agent_type,
+        scope: :book,
+        phase_name: phase.name,
+        instruction:
+          InstructionBuilder.build(phase, :book, state.prompt, state.phase_context, state.book_id)
+      }
+    ]
   end
 
   defp build_tasks_for_phase(%Phase{scope: :per_page} = phase, state) do
     page_ids = scoped_page_ids(:per_page, state)
+
     Enum.map(page_ids, fn page_id ->
       scope = {:page, page_id}
+
       %SubagentTask{
         agent: phase.agent_type,
         scope: scope,
@@ -519,12 +595,16 @@ defmodule Slidething.Agent.Orchestrator do
       |> media_elements_for_page(layout, elements_by_id)
       |> Enum.map(fn {element, aspect} ->
         scope = {:element, element.id}
-        content = get_in(element, [:latest_version, :content]) || get_in(element, [Access.key(:latest_version, %{}), :content]) || ""
+
+        content =
+          get_in(element, [:latest_version, :content]) ||
+            get_in(element, [Access.key(:latest_version, %{}), :content]) || ""
+
         instruction =
           "Generate an image for element #{element.id} (aspect ratio #{aspect}). " <>
-          "Description: #{content}. " <>
-          "Call generate_image with prompt and aspect_ratio=\"#{aspect}\", " <>
-          "then store_asset with the returned asset_path."
+            "Description: #{content}. " <>
+            "Call generate_image with prompt and aspect_ratio=\"#{aspect}\", " <>
+            "then store_asset with the returned asset_path."
 
         %SubagentTask{
           agent: phase.agent_type,
@@ -537,27 +617,35 @@ defmodule Slidething.Agent.Orchestrator do
   end
 
   defp build_agent_instruction(phase, {:page, page_id} = scope, state) do
-    base = InstructionBuilder.build(phase, scope, state.prompt, state.phase_context, state.book_id)
+    base =
+      InstructionBuilder.build(phase, scope, state.prompt, state.phase_context, state.book_id)
 
     # For layout, inject element data and format note inline to avoid extra tool calls
     if phase.agent_type == :layout do
       format = Slidething.Book.get_format(@default_format_id)
-      format_note = if format do
-        "Format: #{format.name}, #{format.width}#{format.unit} × #{format.height}#{format.unit}, " <>
-        "safe_margin=#{format.safe_margin_mm}mm.\n"
-      else
-        ""
-      end
+
+      format_note =
+        if format do
+          "Format: #{format.name}, #{format.width}#{format.unit} × #{format.height}#{format.unit}, " <>
+            "safe_margin=#{format.safe_margin_mm}mm.\n"
+        else
+          ""
+        end
 
       elements = Slidething.Element.list(page_id)
-      elements_note = elements
+
+      elements_note =
+        elements
         |> Enum.map(fn e ->
           content = get_in(e, [:latest_version, :content]) || "(no content)"
+
           "  {element_id: #{e.id}, type: #{e.element_type}, content: #{inspect(String.slice(to_string(content), 0, 80))}}"
         end)
         |> Enum.join("\n")
 
-      base <> "\n\n" <> format_note <>
+      base <>
+        "\n\n" <>
+        format_note <>
         "Elements on page:\n#{elements_note}\n" <>
         "Call propose_layout with page_id=#{page_id}, format_id=\"#{@default_format_id}\", " <>
         "x/y/width/height as fractions in 0..1. Do NOT call get_page_elements or get_format."
@@ -574,9 +662,12 @@ defmodule Slidething.Agent.Orchestrator do
     max_retries = (phase && phase.max_retries) || 2
 
     if retry_count < max_retries do
-      Logger.warning("[Orchestrator] Phase '#{phase_name}' failed, retrying (#{retry_count + 1}/#{max_retries})")
+      Logger.warning(
+        "[Orchestrator] Phase '#{phase_name}' failed, retrying (#{retry_count + 1}/#{max_retries})"
+      )
 
-      new_state = %{state
+      new_state = %{
+        state
         | retry_counts: Map.put(state.retry_counts, phase_name, retry_count + 1),
           running_phases: MapSet.delete(state.running_phases, phase_name)
       }
@@ -587,7 +678,10 @@ defmodule Slidething.Agent.Orchestrator do
         fail_run(new_state, "Phase '#{phase_name}' failed and not found for retry")
       end
     else
-      fail_run(state, "Phase '#{phase_name}' failed after #{retry_count} retries: #{inspect(reason)}")
+      fail_run(
+        state,
+        "Phase '#{phase_name}' failed after #{retry_count} retries: #{inspect(reason)}"
+      )
     end
   end
 
@@ -602,6 +696,7 @@ defmodule Slidething.Agent.Orchestrator do
         # Adding pages to an existing book — always create new ones
         has_per_page = Enum.any?(plan.phases, &(&1.scope == :per_page))
         page_count = if has_per_page, do: 1, else: 0
+
         case Slidething.Book.create_pages(state.book_id, page_count) do
           {:ok, page_ids} -> {:ok, state.book_id, page_ids}
           err -> err
@@ -611,6 +706,7 @@ defmodule Slidething.Agent.Orchestrator do
       # New book: create with defaults, then create pages based on plan
       has_per_page = Enum.any?(plan.phases, &(&1.scope == :per_page))
       page_count = if has_per_page, do: 3, else: 1
+
       with {:ok, %{book_id: new_book_id}} <- Slidething.Book.create("Untitled", %{}),
            _ <- Slidething.Book.add_format(new_book_id, @default_format_id),
            {:ok, page_ids} <- Slidething.Book.create_pages(new_book_id, page_count) do
@@ -704,9 +800,10 @@ defmodule Slidething.Agent.Orchestrator do
   # ── Plan parsing ───────────────────────────────────────────────────────────
 
   defp call_planner(state) do
-    task = Task.Supervisor.async_nolink(Slidething.IOTaskSupervisor, fn ->
-      run_planner_phases(state)
-    end)
+    task =
+      Task.Supervisor.async_nolink(Slidething.IOTaskSupervisor, fn ->
+        run_planner_phases(state)
+      end)
 
     broadcast_event(state, :phase_started, %{phase: :initial_planning})
     task.ref
@@ -743,46 +840,50 @@ defmodule Slidething.Agent.Orchestrator do
   defp build_static_context(state) do
     parts = ["User request: #{state.prompt}"]
 
-    parts = if state.book_id do
-      case Slidething.Book.get(state.book_id) do
-        {:ok, book} ->
-          meta = book.metadata || %{}
-          theme = meta["theme"] || meta[:theme]
-          audience = meta["target_audience"] || meta[:target_audience]
-          lines = ["Existing book:", "  id: #{state.book_id}", "  title: #{book.title}"]
-          lines = if theme, do: lines ++ ["  theme: #{theme}"], else: lines
-          lines = if audience, do: lines ++ ["  target_audience: #{audience}"], else: lines
-          parts ++ [Enum.join(lines, "\n")]
+    parts =
+      if state.book_id do
+        case Slidething.Book.get(state.book_id) do
+          {:ok, book} ->
+            meta = book.metadata || %{}
+            theme = meta["theme"] || meta[:theme]
+            audience = meta["target_audience"] || meta[:target_audience]
+            lines = ["Existing book:", "  id: #{state.book_id}", "  title: #{book.title}"]
+            lines = if theme, do: lines ++ ["  theme: #{theme}"], else: lines
+            lines = if audience, do: lines ++ ["  target_audience: #{audience}"], else: lines
+            parts ++ [Enum.join(lines, "\n")]
+
+          _ ->
+            parts
+        end
+      else
+        parts
+      end
+
+    parts =
+      case state.target_type do
+        "page" when not is_nil(state.target_id) ->
+          page_id = state.target_id
+          elements = Slidething.Element.list(page_id)
+
+          elements_text =
+            if elements == [] do
+              "  (no elements yet)"
+            else
+              Enum.map_join(elements, "\n", fn el ->
+                version = el[:latest_version] || %{}
+                content = version[:content] || version["content"] || "(no content)"
+                "  [#{el.element_type}] #{el.id}: #{String.slice(to_string(content), 0, 100)}"
+              end)
+            end
+
+          parts ++ ["Target page: #{page_id}\nExisting elements:\n#{elements_text}"]
+
+        "element" when not is_nil(state.target_id) ->
+          parts ++ ["Target element: #{state.target_id}"]
+
         _ ->
           parts
       end
-    else
-      parts
-    end
-
-    parts = case state.target_type do
-      "page" when not is_nil(state.target_id) ->
-        page_id = state.target_id
-        elements = Slidething.Element.list(page_id)
-
-        elements_text = if elements == [] do
-          "  (no elements yet)"
-        else
-          Enum.map_join(elements, "\n", fn el ->
-            version = el[:latest_version] || %{}
-            content = version[:content] || version["content"] || "(no content)"
-            "  [#{el.element_type}] #{el.id}: #{String.slice(to_string(content), 0, 100)}"
-          end)
-        end
-
-        parts ++ ["Target page: #{page_id}\nExisting elements:\n#{elements_text}"]
-
-      "element" when not is_nil(state.target_id) ->
-        parts ++ ["Target element: #{state.target_id}"]
-
-      _ ->
-        parts
-    end
 
     Enum.join(parts, "\n\n")
   end
@@ -791,9 +892,9 @@ defmodule Slidething.Agent.Orchestrator do
     spec = Slidething.Agent.Config.agent_spec(:planner_decide)
 
     case Slidething.LLM.Client.complete_json(spec, [
-      %Message{role: :system, content: spec.system_prompt},
-      %Message{role: :user, content: static_context}
-    ]) do
+           %Message{role: :system, content: spec.system_prompt},
+           %Message{role: :user, content: static_context}
+         ]) do
       {:final_response, text} ->
         case Jason.decode(text) do
           {:ok, %{"needs_context" => v}} when is_boolean(v) -> v
@@ -842,7 +943,12 @@ defmodule Slidething.Agent.Orchestrator do
 
   defp build_emit_prompt(static_context, gathered_context) do
     parts = [static_context]
-    parts = if gathered_context != "", do: parts ++ ["\nGathered context:\n" <> gathered_context], else: parts
+
+    parts =
+      if gathered_context != "",
+        do: parts ++ ["\nGathered context:\n" <> gathered_context],
+        else: parts
+
     Enum.join(parts, "\n\n")
   end
 
@@ -850,9 +956,9 @@ defmodule Slidething.Agent.Orchestrator do
     spec = Slidething.Agent.Config.agent_spec(:planner_emit)
 
     case Slidething.LLM.Client.complete_json(spec, [
-      %Message{role: :system, content: spec.system_prompt},
-      %Message{role: :user, content: emit_prompt}
-    ]) do
+           %Message{role: :system, content: spec.system_prompt},
+           %Message{role: :user, content: emit_prompt}
+         ]) do
       {:tool_requests, calls} ->
         Enum.each(calls, fn %ToolCall{tool: t, args: a} ->
           Logger.debug("[Planner] Emit tool call: #{t} args=#{inspect(a, limit: 3000)}")

@@ -88,7 +88,11 @@ defmodule Slidething.Agent.GenServer do
       result: nil
     }
 
-    broadcast_event(state, :started, %{agent_type: state.agent_type, scope: scope_to_json(state.scope)})
+    broadcast_event(state, :started, %{
+      agent_type: state.agent_type,
+      scope: scope_to_json(state.scope)
+    })
+
     {:ok, state}
   end
 
@@ -166,7 +170,11 @@ defmodule Slidething.Agent.GenServer do
 
     case result do
       {:tool_requests, calls} ->
-        broadcast_event(state, :llm_response, %{result_type: :tool_requests, tool_count: length(calls)})
+        broadcast_event(state, :llm_response, %{
+          result_type: :tool_requests,
+          tool_count: length(calls)
+        })
+
         handle_tool_requests(state, calls)
 
       {:patch_proposal, patch} ->
@@ -290,7 +298,7 @@ defmodule Slidething.Agent.GenServer do
     }
   end
 
-defp broadcast_event(state, event_type, data) do
+  defp broadcast_event(state, event_type, data) do
     event = %{
       run_id: state.run_id,
       agent_type: state.agent_type,

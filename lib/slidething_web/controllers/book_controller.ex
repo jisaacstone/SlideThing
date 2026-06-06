@@ -22,11 +22,19 @@ defmodule SlidethingWeb.BookController do
   def list(conn, _params) do
     result =
       Slidething.Repo
-      |> Ecto.Adapters.SQL.query!("SELECT id, title, metadata, created_at, updated_at FROM books ORDER BY updated_at DESC")
+      |> Ecto.Adapters.SQL.query!(
+        "SELECT id, title, metadata, created_at, updated_at FROM books ORDER BY updated_at DESC"
+      )
 
     books =
       for [id, title, meta_json, created, updated] <- result.rows do
-        %{id: id, title: title, metadata: parse_json(meta_json), created_at: created, updated_at: updated}
+        %{
+          id: id,
+          title: title,
+          metadata: parse_json(meta_json),
+          created_at: created,
+          updated_at: updated
+        }
       end
 
     json(conn, books)
@@ -39,11 +47,14 @@ defmodule SlidethingWeb.BookController do
 
   def create_page(conn, %{"book_id" => book_id} = params) do
     next_pos = get_next_position(book_id)
-    metadata = case params["title"] do
-      nil -> %{}
-      "" -> %{}
-      title -> %{"title" => title}
-    end
+
+    metadata =
+      case params["title"] do
+        nil -> %{}
+        "" -> %{}
+        title -> %{"title" => title}
+      end
+
     {:ok, [page_id]} = Book.create_pages(book_id, [%{position: next_pos, metadata: metadata}])
     {:ok, page} = Book.get_page(page_id)
     conn |> put_status(201) |> json(page)
@@ -52,7 +63,10 @@ defmodule SlidethingWeb.BookController do
   defp get_next_position(book_id) do
     result =
       Slidething.Repo
-      |> Ecto.Adapters.SQL.query!("SELECT COALESCE(MAX(position), 0) + 1 FROM pages WHERE book_id = ?", [book_id])
+      |> Ecto.Adapters.SQL.query!(
+        "SELECT COALESCE(MAX(position), 0) + 1 FROM pages WHERE book_id = ?",
+        [book_id]
+      )
 
     [[pos]] = result.rows
     pos

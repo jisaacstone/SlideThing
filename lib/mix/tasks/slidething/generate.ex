@@ -39,7 +39,10 @@ defmodule Mix.Tasks.Slidething.Generate do
     prompt = Enum.join(rest, " ")
 
     if prompt == "" do
-      IO.puts("Usage: mix generate \"Your book prompt\" [--provider mock|gemini|openrouter] [--model MODEL]")
+      IO.puts(
+        "Usage: mix generate \"Your book prompt\" [--provider mock|gemini|openrouter] [--model MODEL]"
+      )
+
       System.halt(1)
     end
 
@@ -67,7 +70,10 @@ defmodule Mix.Tasks.Slidething.Generate do
 
   defp apply_provider_override(provider, model_override, image_provider, image_model_override) do
     model = model_override || Map.get(@provider_default_models, provider, provider)
-    image_model = image_model_override || Map.get(@image_provider_default_models, image_provider, image_provider)
+
+    image_model =
+      image_model_override ||
+        Map.get(@image_provider_default_models, image_provider, image_provider)
 
     IO.puts("Provider: #{provider}, Model: #{model}")
     IO.puts("Image provider: #{image_provider}, Image model: #{image_model}")
