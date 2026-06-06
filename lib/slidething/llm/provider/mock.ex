@@ -10,47 +10,103 @@ defmodule Slidething.LLM.Provider.Mock do
 
   @impl true
   def complete_json(%AgentSpec{name: :planner}, messages) do
+    existing_book? = Enum.any?(messages, fn msg ->
+      is_binary(msg.content) and String.contains?(msg.content, "Existing book:")
+    end)
+
+    pages =
+      if existing_book? do
+        [%{"position" => 1, "metadata" => %{"description" => "New page added to book", "beat" => "fox at the market", "has_image" => true}}]
+      else
+        [
+          %{"position" => 1, "metadata" => %{"description" => "Introduction — the main character appears", "beat" => "fox alone in forest", "has_image" => true}},
+          %{"position" => 2, "metadata" => %{"description" => "The problem arises", "beat" => "fox meets rabbit", "has_image" => true}},
+          %{"position" => 3, "metadata" => %{"description" => "The resolution", "beat" => "fox learns to share", "has_image" => true}}
+        ]
+      end
+
+    plan = %{
+      "book" => %{
+        "title" => "Mock Children's Book",
+        "metadata" => %{"theme" => "adventure", "target_audience" => "ages 4-6", "style" => "watercolor"}
+      },
+      "pages" => pages,
+      "phases" => [
+        %{"name" => "decide_theme",    "step_type" => "planner",     "agent_type" => "planner",       "scope" => "book",     "depends_on" => [],                "condition" => nil, "max_retries" => 1},
+        %{"name" => "assign_outline",  "step_type" => "planner",     "agent_type" => "planner",       "scope" => "book",     "depends_on" => ["decide_theme"],   "condition" => nil, "max_retries" => 1},
+        %{"name" => "process_pages",   "step_type" => "agent",       "agent_type" => "page_pipeline", "scope" => "per_page", "depends_on" => ["assign_outline"], "condition" => nil, "max_retries" => 2},
+        %{"name" => "review_book",     "step_type" => "coordinator", "agent_type" => "coordinator",   "scope" => "book",     "depends_on" => ["process_pages"],  "condition" => nil, "max_retries" => 1},
+        %{"name" => "validate_book",   "step_type" => "validator",   "agent_type" => "validator",     "scope" => "per_page", "depends_on" => ["review_book"],    "condition" => nil, "max_retries" => 1}
+      ]
+    }
+
+    {:final_response, Jason.encode!(plan)}
+  end
+
+  def complete_json(%AgentSpec{name: :page_pipeline}, messages) do
     iteration = count_iterations(messages)
+    page_id = extract_page_scope_id(messages)
+    existing_image_id = extract_existing_image_id(messages)
 
-    case iteration do
-      0 ->
-        {:tool_requests,
-         [
-           %ToolCall{
-             call_id: "planner_call_0",
-             tool: :create_book,
-             args: %{"title" => "Mock Children's Book", "metadata" => %{"theme" => "adventure", "target_audience" => "ages 4-6"}}
-           }
-         ]}
+    if existing_image_id do
+      # Update-image flow: just update the existing element then finish
+      case iteration do
+        0 ->
+          tool_call("pp_0", :update_element, %{
+            "element_id" => existing_image_id,
+            "content" => "Vibrant fox in forest with sunset colors"
+          })
+        _ ->
+          {:final_response, "Page complete for #{page_id}"}
+      end
+    else
+      case iteration do
+        0 ->
+          tool_call("pp_0", :create_element, %{
+            "page_id" => page_id || "page-unknown",
+            "element_type" => "title",
+            "content" => "Mock title for #{page_id}"
+          })
 
-      1 ->
-        book_id = extract_book_id(messages)
-        {:tool_requests,
-         [
-           %ToolCall{
-             call_id: "planner_call_1",
-             tool: :create_pages,
-             args: %{
-               "book_id" => book_id,
-               "pages" => [
-                 %{"position" => 1, "metadata" => %{"description" => "Page 1: Introduction — the main character appears"}},
-                 %{"position" => 2, "metadata" => %{"description" => "Page 2: The problem arises"}},
-                 %{"position" => 3, "metadata" => %{"description" => "Page 3: The resolution"}}
-               ]
-             }
-           }
-         ]}
+        1 ->
+          tool_call("pp_1", :create_element, %{
+            "page_id" => page_id || "page-unknown",
+            "element_type" => "text",
+            "content" => "Once upon a time on #{page_id}, a brave fox set off on an adventure."
+          })
 
-      _ ->
-        page_ids = extract_page_ids(messages)
-        plan_json = Jason.encode!(%{
-          "book_id" => extract_book_id(messages),
-          "pages" => Enum.map(page_ids, fn {id, pos} ->
-            %{"page_id" => id, "position" => pos, "description" => "Mock page description"}
-          end)
-        })
-        {:final_response, plan_json}
+        2 ->
+          tool_call("pp_2", :propose_layout, %{
+            "page_id" => page_id || "page-unknown",
+            "format_id" => "format-web",
+            "element_layouts" => [
+              %{"element_id" => "title-placeholder", "x" => 0.1, "y" => 0.05, "width" => 0.8, "height" => 0.1},
+              %{"element_id" => "text-placeholder",  "x" => 0.1, "y" => 0.18, "width" => 0.8, "height" => 0.3}
+            ]
+          })
+
+        3 ->
+          tool_call("pp_3", :validate_page, %{
+            "page_id" => page_id || "page-unknown",
+            "format_id" => "format-web"
+          })
+
+        _ ->
+          {:final_response, "Page complete for #{page_id}"}
+      end
     end
+  end
+
+  def complete_json(%AgentSpec{name: :coordinator}, _messages) do
+    result = %{
+      "context" => %{
+        "assessment" => "Book content looks coherent. Tone and character are consistent across pages.",
+        "issues_found" => []
+      },
+      "plan_patches" => []
+    }
+
+    {:final_response, Jason.encode!(result)}
   end
 
   def complete_json(%AgentSpec{name: :content}, messages) do
@@ -199,32 +255,6 @@ defmodule Slidething.LLM.Provider.Mock do
     end)
   end
 
-  defp extract_book_id(messages) do
-    messages
-    |> Enum.find_value(fn
-      %Message{role: :tool, tool_results: results} ->
-        Enum.find_value(results, fn
-          %{tool: :create_book, success: true, data: %{book_id: bid}} -> bid
-          %{tool: :create_book, success: true, data: %{"book_id" => bid}} -> bid
-          _ -> nil
-        end)
-      _ -> nil
-    end) || "book-mock-default"
-  end
-
-  defp extract_page_ids(messages) do
-    messages
-    |> Enum.find_value(fn
-      %Message{role: :tool, tool_results: results} ->
-        ids = Enum.find_value(results, fn
-          %{tool: :create_pages, success: true, data: %{page_ids: pids}} -> pids
-          %{tool: :create_pages, success: true, data: %{"page_ids" => pids}} -> pids
-          _ -> nil
-        end)
-        if ids, do: Enum.with_index(ids, 1)
-      _ -> nil
-    end) || []
-  end
 
   defp extract_page_scope(messages) do
     messages
@@ -305,6 +335,14 @@ defmodule Slidething.LLM.Provider.Mock do
       _ ->
         nil
     end) || []
+  end
+
+  defp extract_existing_image_id(messages) do
+    content = extract_user_content(messages) || ""
+    case Regex.run(~r/\[image\] (elem_[a-z0-9_-]+)/, content) do
+      [_, id] -> id
+      _ -> nil
+    end
   end
 
   defp extract_format_id(messages) do

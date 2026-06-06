@@ -90,9 +90,9 @@ defmodule Slidething.Agent do
 
   defmodule SubagentTask do
     @moduledoc """
-    Task for a subagent.
+    Task for a subagent within a phase.
     """
-    defstruct [:agent, :scope, :instruction]
+    defstruct [:agent, :scope, :instruction, :phase_name, context: %{}]
 
     @type scope ::
             :book
@@ -104,7 +104,9 @@ defmodule Slidething.Agent do
     @type t :: %__MODULE__{
             agent: :research | :content | :layout | :media,
             scope: scope(),
-            instruction: String.t()
+            instruction: String.t(),
+            phase_name: String.t() | nil,
+            context: map()
           }
   end
 

@@ -149,6 +149,29 @@ defmodule Slidething.Tool.Registry do
     data
   end
 
+  # Validation tool (callable by page_pipeline agents)
+  defp do_execute(:validate_page, args) do
+    page_id = args["page_id"] || args[:page_id]
+    format_id = args["format_id"] || args[:format_id] || "format-web"
+
+    if is_nil(page_id), do: raise("validate_page requires page_id")
+
+    issues = Slidething.Validator.Layout.validate(page_id, format_id)
+
+    issue_maps =
+      Enum.map(issues, fn i ->
+        %{
+          severity: i.severity,
+          rule: i.rule,
+          target_id: i.target_id,
+          message: i.message,
+          measured_value: i.measured_value
+        }
+      end)
+
+    %{issue_count: length(issue_maps), issues: issue_maps}
+  end
+
   # Unknown tool
   defp do_execute(tool, _args) do
     Logger.warning("[Tool.Registry] Unknown tool: #{tool}")

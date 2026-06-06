@@ -76,6 +76,7 @@ defmodule Slidething.Element do
       %{num_rows: 0} -> {:error, :not_found}
       %{rows: [[id, page_id, element_type, position, locked, created, updated]]} ->
         versions = get_versions(element_id, opts)
+        latest_version = List.last(versions)
         {:ok, %{
           id: id,
           page_id: page_id,
@@ -83,6 +84,7 @@ defmodule Slidething.Element do
           position: position,
           locked: locked == 1,
           versions: versions,
+          latest_version: latest_version,
           created_at: created,
           updated_at: updated
         }}

@@ -11,8 +11,6 @@ defmodule Slidething.Transcript do
   without a parent prompt row — useful for tests.
   """
 
-  require Logger
-
   alias Slidething.Agent.{Message, ToolCall, ToolResult}
   alias Slidething.Repo
 

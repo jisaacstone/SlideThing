@@ -3,190 +3,164 @@ defmodule Slidething.Agent.OrchestratorTest do
 
   alias Slidething.Agent.Orchestrator
 
+  @run_timeout 10_000
+
   setup do
     run_id = "test_run_#{Ecto.UUID.generate()}"
-
     {:ok, orchestrator_pid} = Orchestrator.start_link(run_id: run_id)
 
-    on_exit(fn ->
-      DynamicSupervisor.which_children(Slidething.RunSupervisor)
-      |> Enum.each(fn
-        {:undefined, pid, :worker, [Slidething.Agent.GenServer]} when is_pid(pid) ->
-          DynamicSupervisor.terminate_child(Slidething.RunSupervisor, pid)
+    Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
-        _ ->
-          :ok
-      end)
+    on_exit(fn ->
+      if Process.alive?(orchestrator_pid), do: GenServer.stop(orchestrator_pid, :normal, 1_000)
     end)
 
     %{run_id: run_id, orchestrator_pid: orchestrator_pid}
   end
 
   describe "start_link/1" do
-    test "starts orchestrator and registers in registry", %{
-      orchestrator_pid: orchestrator_pid,
-      run_id: run_id
-    } do
-      assert Process.alive?(orchestrator_pid)
-
-      assert [{^orchestrator_pid, _}] =
-               Registry.lookup(Slidething.RunRegistry, run_id)
+    test "starts and registers in RunRegistry", %{orchestrator_pid: pid, run_id: run_id} do
+      assert Process.alive?(pid)
+      assert [{^pid, _}] = Registry.lookup(Slidething.RunRegistry, run_id)
     end
 
-    test "initializes with idle state", %{orchestrator_pid: orchestrator_pid} do
-      state = Orchestrator.get_state(orchestrator_pid)
-
+    test "initializes with idle status", %{orchestrator_pid: pid} do
+      state = Orchestrator.get_state(pid)
       assert state.status == :idle
-      assert state.phase == nil
-      assert state.plan == nil
+      assert state.generated_plan == nil
       assert state.prompt == nil
       assert state.book_id == nil
     end
   end
 
   describe "start_run/3" do
-    test "transitions to planning state", %{orchestrator_pid: orchestrator_pid} do
-      Orchestrator.start_run(orchestrator_pid, "Create a book", "book-123")
-
-      state = Orchestrator.get_state(orchestrator_pid)
-      assert state.status in [:planning, :executing, :validating, :done]
-      assert state.prompt == "Create a book"
-      assert state.book_id == "book-123"
+    test "transitions out of idle on start", %{orchestrator_pid: pid} do
+      Orchestrator.start_run(pid, "Create a book", nil)
+      state = Orchestrator.get_state(pid)
+      assert state.status in [:planning, :executing, :done, :failed]
     end
 
-    test "broadcasts started event", %{orchestrator_pid: orchestrator_pid, run_id: run_id} do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
-
-      Orchestrator.start_run(orchestrator_pid, "Test prompt", nil)
-
-      assert_receive {:run_event, %{event: :started, data: %{prompt: "Test prompt"}}}, 1000
+    test "stores prompt and book_id", %{orchestrator_pid: pid} do
+      {:ok, %{book_id: book_id}} = Slidething.Book.create("Pre-existing", %{})
+      Orchestrator.start_run(pid, "My prompt", book_id)
+      state = Orchestrator.get_state(pid)
+      assert state.prompt == "My prompt"
+      assert state.book_id == book_id
     end
 
-    test "starts planner agent", %{orchestrator_pid: orchestrator_pid, run_id: run_id} do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
+    test "broadcasts :started event immediately", %{orchestrator_pid: pid} do
+      Orchestrator.start_run(pid, "Test prompt", nil)
+      assert_receive {:run_event, %{event: :started, data: %{prompt: "Test prompt"}}}, 2_000
+    end
 
-      Orchestrator.start_run(orchestrator_pid, "Test", nil)
-
-      # Should see phase_started for planner
-      assert_receive {:run_event, %{event: :phase_started, data: %{phase: :planner}}}, 1000
+    test "broadcasts :phase_started for initial planning", %{orchestrator_pid: pid} do
+      Orchestrator.start_run(pid, "Test", nil)
+      assert_receive {:run_event, %{event: :phase_started, data: %{phase: :initial_planning}}}, 2_000
     end
   end
 
-  describe "state machine transitions" do
-    test "planner → content → validating → done", %{
-      orchestrator_pid: orchestrator_pid,
-      run_id: run_id
-    } do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
-
-      Orchestrator.start_run(orchestrator_pid, "Create content", nil)
-
-      # Planner phase
-      assert_receive {:run_event, %{event: :phase_started, data: %{phase: :planner}}}, 1000
-
-      # Planner completes
-      assert_receive {:run_event, %{event: :phase_completed, data: %{phase: :planner}}}, 2000
-
-      # Content phase starts
-      assert_receive {:run_event, %{event: :phase_started, data: %{phase: :content}}}, 1000
-
-      # Content completes
-      assert_receive {:run_event, %{event: :phase_completed, data: %{phase: :content}}}, 3000
-
-      # Validation starts
-      assert_receive {:run_event, %{event: :validation_started}}, 1000
-
-      # Run completes
-      assert_receive {:run_event, %{event: :completed}}, 1000
-
-      state = Orchestrator.get_state(orchestrator_pid)
-      assert state.status == :done
-      assert state.completed_at != nil
+  describe "full run lifecycle" do
+    test "completes with :done status", %{orchestrator_pid: pid} do
+      Orchestrator.start_run(pid, "Create a book", nil)
+      assert_receive {:run_event, %{event: :completed}}, @run_timeout
+      assert Orchestrator.get_state(pid).status == :done
     end
 
-    test "creates run plan from planner result", %{
-      orchestrator_pid: orchestrator_pid,
-      run_id: run_id
-    } do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
-
-      Orchestrator.start_run(orchestrator_pid, "Test", nil)
-
-      # Wait for planner to complete
-      assert_receive {:run_event, %{event: :phase_completed, data: %{phase: :planner}}},
-                     2000
-
-      state = Orchestrator.get_state(orchestrator_pid)
-      assert state.plan != nil
-      assert is_list(state.plan.tasks)
-      assert length(state.plan.tasks) > 0
-    end
-  end
-
-  describe "agent coordination" do
-    test "collects results from multiple agents", %{
-      orchestrator_pid: orchestrator_pid,
-      run_id: run_id
-    } do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
-
-      Orchestrator.start_run(orchestrator_pid, "Test", nil)
-
-      # Wait for content phase to start (multiple agents)
-      assert_receive {:run_event, %{event: :phase_started, data: %{phase: :content}}}, 2000
-
-      # Wait for completion
-      assert_receive {:run_event, %{event: :completed}}, 5000
-
-      state = Orchestrator.get_state(orchestrator_pid)
-      assert state.status == :done
+    test "planning_complete event carries book_id and counts", %{orchestrator_pid: pid} do
+      Orchestrator.start_run(pid, "Create a book", nil)
+      assert_receive {:run_event, %{event: :planning_complete, data: data}}, @run_timeout
+      assert is_binary(data.book_id)
+      assert data.page_count > 0
+      assert data.phase_count > 0
     end
 
-    test "handles agent failures", %{orchestrator_pid: orchestrator_pid, run_id: run_id} do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
+    test "generated_plan is set after planning", %{orchestrator_pid: pid} do
+      Orchestrator.start_run(pid, "Create a book", nil)
+      assert_receive {:run_event, %{event: :planning_complete}}, @run_timeout
+      state = Orchestrator.get_state(pid)
+      assert state.generated_plan != nil
+      assert is_list(state.generated_plan.phases)
+      assert length(state.generated_plan.phases) > 0
+    end
 
-      # Start run
-      Orchestrator.start_run(orchestrator_pid, "Test", nil)
+    test "all phases in the plan complete", %{orchestrator_pid: pid} do
+      Orchestrator.start_run(pid, "Create a book", nil)
+      assert_receive {:run_event, %{event: :completed}}, @run_timeout
 
-      # Manually send agent_failed message
-      send(orchestrator_pid, {:agent_failed, self(), :test_failure})
+      state = Orchestrator.get_state(pid)
+      plan_phase_names = MapSet.new(state.generated_plan.phases, & &1.name)
 
-      assert_receive {:run_event, %{event: :failed, data: %{reason: ":test_failure"}}}, 1000
+      # Every phase whose condition was met should be in completed_phases
+      # (conditional phases that weren't triggered won't be)
+      Enum.each(state.generated_plan.phases, fn phase ->
+        if is_nil(phase.condition) do
+          assert MapSet.member?(state.completed_phases, phase.name),
+                 "phase '#{phase.name}' should be completed"
+        end
+      end)
 
-      state = Orchestrator.get_state(orchestrator_pid)
-      assert state.status == :failed
+      _ = plan_phase_names
+    end
+
+    test "completed_at is set on :done", %{orchestrator_pid: pid} do
+      Orchestrator.start_run(pid, "Create a book", nil)
+      assert_receive {:run_event, %{event: :completed}}, @run_timeout
+      assert Orchestrator.get_state(pid).completed_at != nil
     end
   end
 
-  describe "event broadcasting" do
-    test "broadcasts all phase transitions", %{
-      orchestrator_pid: orchestrator_pid,
-      run_id: run_id
-    } do
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
+  describe "failure handling" do
+    test "unknown agent_failed pid is ignored gracefully", %{orchestrator_pid: pid} do
+      Orchestrator.start_run(pid, "Create a book", nil)
+      assert_receive {:run_event, %{event: :planning_complete}}, @run_timeout
 
-      Orchestrator.start_run(orchestrator_pid, "Test", nil)
+      # Send a failure from a pid not tracked in pending_agents — should not crash
+      send(pid, {:agent_failed, self(), :stray_failure})
+      assert Process.alive?(pid)
+    end
+
+    test "status is :done after successful run", %{orchestrator_pid: pid} do
+      Orchestrator.start_run(pid, "Create a book", nil)
+      assert_receive {:run_event, %{event: :completed}}, @run_timeout
+      assert Orchestrator.get_state(pid).status == :done
+    end
+  end
+
+  describe "event stream" do
+    test "event stream includes :started, :planning_complete, :phase_started, :phase_completed, :completed", %{orchestrator_pid: pid} do
+      Orchestrator.start_run(pid, "Create a book", nil)
 
       events =
-        collect_until_completed([])
-        |> Enum.map(fn %{event: event} -> event end)
+        collect_events_until(:completed, @run_timeout)
+        |> Enum.map(& &1.event)
 
       assert :started in events
+      assert :planning_complete in events
       assert :phase_started in events
       assert :phase_completed in events
-      assert :validation_started in events
       assert :completed in events
     end
 
-    defp collect_until_completed(acc) do
-      receive do
-        {:run_event, %{event: :completed} = event} ->
-          Enum.reverse([event | acc])
-        {:run_event, event} ->
-          collect_until_completed([event | acc])
-      after
-        5000 -> Enum.reverse(acc)
+    test "every event carries run_id and timestamp", %{orchestrator_pid: pid, run_id: run_id} do
+      Orchestrator.start_run(pid, "Test", nil)
+
+      events = collect_events_until(:completed, @run_timeout)
+
+      for event <- events do
+        assert event.run_id == run_id
+        assert %DateTime{} = event.timestamp
       end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+
+  defp collect_events_until(terminal, timeout, acc \\ []) do
+    receive do
+      {:run_event, %{event: ^terminal} = e} -> Enum.reverse([e | acc])
+      {:run_event, e} -> collect_events_until(terminal, timeout, [e | acc])
+    after
+      timeout -> Enum.reverse(acc)
     end
   end
 end

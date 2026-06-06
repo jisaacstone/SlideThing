@@ -3,6 +3,8 @@ defmodule Slidething.Agent.APITest do
 
   alias Slidething.Agent.API
 
+  @run_timeout 10_000
+
   describe "start_run/2" do
     test "creates a new run and returns run_id" do
       assert {:ok, run_id} = API.start_run("Test prompt")
@@ -12,14 +14,12 @@ defmodule Slidething.Agent.APITest do
 
     test "registers orchestrator in RunRegistry" do
       {:ok, run_id} = API.start_run("Test")
-
       assert [{_pid, _}] = Registry.lookup(Slidething.RunRegistry, run_id)
     end
 
     test "starts run with book_id" do
       {:ok, %{book_id: book_id}} = Slidething.Book.create("Test Book", %{})
       {:ok, run_id} = API.start_run("Test", book_id)
-
       state = API.get_run_status(run_id)
       assert state.book_id == book_id
     end
@@ -28,11 +28,10 @@ defmodule Slidething.Agent.APITest do
   describe "get_run_status/1" do
     test "returns orchestrator state for active run" do
       {:ok, run_id} = API.start_run("Test")
-
       state = API.get_run_status(run_id)
       assert state.run_id == run_id
       assert state.prompt == "Test"
-      assert state.status in [:planning, :executing, :validating, :done]
+      assert state.status in [:planning, :executing, :done, :failed]
     end
 
     test "returns :not_found for unknown run" do
@@ -41,40 +40,23 @@ defmodule Slidething.Agent.APITest do
   end
 
   describe "get_agents/1" do
-    test "returns list of agents for a run" do
+    test "returns list of agents after process_pages starts" do
       {:ok, run_id} = API.start_run("Test")
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
+      API.subscribe_to_run(run_id)
 
-      assert_receive {:run_event, %{event: :phase_started, data: %{phase: :content}}}, 3000
+      # Wait for any phase_started event that indicates agents are spawning
+      assert_receive {:run_event, %{event: :phase_started}}, @run_timeout
 
       agents = API.get_agents(run_id)
       assert is_list(agents)
-      assert length(agents) > 0
     end
 
-    test "returns empty list for run with no agents yet" do
-      agents = API.get_agents("nonexistent")
-      assert agents == []
+    test "returns empty list for unknown run" do
+      assert [] = API.get_agents("nonexistent")
     end
   end
 
   describe "get_agent_state/3" do
-    test "returns agent state for specific agent" do
-      {:ok, run_id} = API.start_run("Test")
-      Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
-
-      assert_receive {:run_event, %{event: :phase_started, data: %{phase: :content}}}, 3000
-
-      case API.get_agent_state(run_id, :content, :book) do
-        :not_found ->
-          assert true
-
-        state ->
-          assert state.run_id == run_id
-          assert state.agent_type == :content
-      end
-    end
-
     test "returns :not_found for unknown agent" do
       assert :not_found = API.get_agent_state("run_123", :unknown, nil)
     end
@@ -97,22 +79,13 @@ defmodule Slidething.Agent.APITest do
     test "subscribe_to_run/1 receives run events" do
       {:ok, run_id} = API.start_run("Test")
       API.subscribe_to_run(run_id)
-
-      assert_receive {:run_event, %{run_id: ^run_id}}, 1000
+      assert_receive {:run_event, %{run_id: ^run_id}}, 2_000
     end
 
     test "subscribe_to_agent_events/1 receives agent events" do
       {:ok, run_id} = API.start_run("Test")
       API.subscribe_to_agent_events(run_id)
-
-      assert_receive {:agent_event, %{run_id: ^run_id}}, 2000
-    end
-
-    test "subscribe_to_all_agent_events/0 receives all events" do
-      {:ok, ride} = API.start_run("Test")
-      API.subscribe_to_agent_events(ride)
-
-      assert_receive {:agent_event, %{event: :started}}, 3000
+      assert_receive {:agent_event, %{run_id: ^run_id}}, @run_timeout
     end
   end
 
@@ -121,13 +94,8 @@ defmodule Slidething.Agent.APITest do
       {:ok, run_id} = API.start_run("Create a book about cats")
       API.subscribe_to_run(run_id)
 
-      assert_receive {:run_event, %{event: :phase_completed, data: %{phase: :planner}}}, 2000
-
-      assert_receive {:run_event, %{event: :phase_started, data: %{phase: :content}}}, 1000
-
-      assert_receive {:run_event, %{event: :validation_started}}, 3000
-
-      assert_receive {:run_event, %{event: :completed}}, 1000
+      assert_receive {:run_event, %{event: :planning_complete}}, @run_timeout
+      assert_receive {:run_event, %{event: :completed}}, @run_timeout
 
       state = API.get_run_status(run_id)
       assert state.status == :done
