@@ -14,6 +14,7 @@
       @add-page="handleAddPage"
       @delete-page="handleDeletePage"
       @delete-book="handleDeleteBook"
+      @book-prompt="openBookPrompt"
     />
 
     <PageView
@@ -30,8 +31,14 @@
       :bookId="currentBookId || ''"
       :prompts="prompts"
       :isRunning="isRunning"
+      :liveLog="liveLog"
+      :runFinalStatus="runFinalStatus"
+      :runFailReason="runFailReason"
+      :selectedElement="selectedElement"
       @close="closePanel"
       @submit="submitPrompt"
+      @delete="handleDeleteElement"
+      @updateContent="handleUpdateContent"
     />
   </div>
 </template>
@@ -52,6 +59,7 @@ import {
   createPage,
   moveElement,
   updateElementContent,
+  deleteElement,
 } from "./api";
 import OutlineSidebar from "./components/OutlineSidebar.vue";
 import PageView from "./components/PageView.vue";
@@ -65,11 +73,16 @@ const currentPage = ref<Page | null>(null);
 const selectedPageId = ref<string | null>(null);
 const selectedElementId = ref<string | null>(null);
 const prompts = ref<PromptEntry[]>([]);
+const bookLevelOpen = ref(false);
 const isRunning = ref(false);
+const liveLog = ref<string[]>([]);
+const runFinalStatus = ref<"idle" | "done" | "failed">("idle");
+const runFailReason = ref("");
 
 const targetType = computed(() => {
   if (selectedElementId.value) return "element";
   if (selectedPageId.value) return "page";
+  if (bookLevelOpen.value) return "book";
   return "";
 });
 
@@ -86,7 +99,17 @@ const selectionLabel = computed(() => {
   if (selectedPageId.value && currentPage.value) {
     return `Page ${currentPage.value.position}`;
   }
+  if (bookLevelOpen.value && currentBook.value) {
+    return currentBook.value.title || "Book";
+  }
   return "";
+});
+
+const selectedElement = computed(() => {
+  if (selectedElementId.value && currentPage.value) {
+    return currentPage.value.elements.find((e) => e.id === selectedElementId.value) || null;
+  }
+  return null;
 });
 
 const previousBookId = ref<string | null>(null);
@@ -144,6 +167,7 @@ async function loadPages(bookId: string) {
 async function selectPage(pageId: string) {
   selectedPageId.value = pageId;
   selectedElementId.value = null;
+  bookLevelOpen.value = false;
 
   const page = await fetchPage(pageId);
   currentPage.value = page;
@@ -155,6 +179,7 @@ async function selectPage(pageId: string) {
 
 function selectElement(elementId: string) {
   selectedElementId.value = elementId;
+  bookLevelOpen.value = false;
   if (currentBookId.value) {
     loadPrompts();
   }
@@ -163,7 +188,17 @@ function selectElement(elementId: string) {
 function closePanel() {
   selectedPageId.value = null;
   selectedElementId.value = null;
+  bookLevelOpen.value = false;
   prompts.value = [];
+}
+
+async function openBookPrompt() {
+  selectedPageId.value = null;
+  selectedElementId.value = null;
+  bookLevelOpen.value = true;
+  if (currentBookId.value) {
+    prompts.value = await fetchPrompts(currentBookId.value);
+  }
 }
 
 async function handleCreateBook(title: string, prompt?: string) {
@@ -173,6 +208,8 @@ async function handleCreateBook(title: string, prompt?: string) {
   await loadBooks();
   await selectBook(result.book_id);
   if (prompt?.trim()) {
+    bookLevelOpen.value = true;
+    prompts.value = [];
     await submitPrompt(prompt.trim(), "", "");
   }
 }
@@ -227,16 +264,53 @@ async function handleMoveElement(elementId: string, x: number, y: number) {
   if (selectedPageId.value) selectPage(selectedPageId.value);
 }
 
+async function handleDeleteElement(elementId: string) {
+  if (!confirm("Delete this element?")) return;
+  await deleteElement(elementId);
+  selectedElementId.value = null;
+  prompts.value = [];
+  if (selectedPageId.value) selectPage(selectedPageId.value);
+}
+
+function formatRunEvent(e: RunEvent): string | null {
+  switch (e.event) {
+    case "started": return "▶ Run started";
+    case "planning_complete": return `📋 Plan: ${e.data?.phase_count ?? "?"} phases`;
+    case "phase_started": return `⚙ Phase: ${e.data?.phase ?? JSON.stringify(e.data)}`;
+    case "phase_completed": return `✓ Done: ${e.data?.phase ?? JSON.stringify(e.data)}`;
+    case "completed": return `✓ Completed in ${e.data?.duration_ms ?? "?"}ms`;
+    case "failed": return `✗ Failed: ${e.data?.reason ?? "unknown"}`;
+    default: return null;
+  }
+}
+
+function formatAgentEvent(e: any): string | null {
+  switch (e.event) {
+    case "llm_call_started": return `  ${e.agent_type} → thinking (iter ${e.data?.iteration ?? "?"})`;
+    case "tools_executed": return `  ${e.agent_type} → ran ${e.data?.tool_count ?? "?"} tool(s)`;
+    case "completed": return `  ${e.agent_type} done`;
+    case "failed": return `  ${e.agent_type} failed: ${e.data?.reason ?? ""}`;
+    default: return null;
+  }
+}
+
 async function submitPrompt(text: string, ttype: string, tid: string) {
   if (isRunning.value || !text || !currentBookId.value) return;
   isRunning.value = true;
+  liveLog.value = [];
+  runFinalStatus.value = "idle";
+  runFailReason.value = "";
 
   try {
     const result = await startRun(text, currentBookId.value, ttype, tid);
 
     channel.join(`run:${result.run_id}`, {
       run_event(event: RunEvent) {
+        const msg = formatRunEvent(event);
+        if (msg) liveLog.value.push(msg);
+
         if (event.event === "completed" || event.status === "done") {
+          runFinalStatus.value = "done";
           isRunning.value = false;
           channel.leave(`run:${result.run_id}`);
           loadPrompts();
@@ -244,14 +318,22 @@ async function submitPrompt(text: string, ttype: string, tid: string) {
           if (selectedPageId.value) selectPage(selectedPageId.value);
         }
         if (event.event === "failed" || event.status === "failed") {
+          runFinalStatus.value = "failed";
+          runFailReason.value = event.data?.reason ?? "unknown error";
           isRunning.value = false;
           channel.leave(`run:${result.run_id}`);
+          loadPrompts();
         }
       },
-      agent_event(_event: any) {},
+      agent_event(event: any) {
+        const msg = formatAgentEvent(event);
+        if (msg) liveLog.value.push(msg);
+      },
     });
   } catch {
     isRunning.value = false;
+    runFinalStatus.value = "failed";
+    runFailReason.value = "Failed to start run";
   }
 }
 </script>

@@ -1,0 +1,7 @@
+{
+  "default_provider": "openrouter",
+  "default_model": "google/gemini-2.5-flash-lite",
+  "default_image_provider": "openrouter",
+  "default_image_model": "google/gemini-2.5-flash-image",
+  "agents": {}
+}

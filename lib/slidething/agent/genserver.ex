@@ -51,13 +51,14 @@ defmodule Slidething.Agent.GenServer do
     run_id = Keyword.fetch!(opts, :run_id)
     agent_type = Keyword.fetch!(opts, :agent_type)
     scope = Keyword.get(opts, :scope)
+    phase_name = Keyword.get(opts, :phase_name)
 
-    name = via_tuple(run_id, agent_type, scope)
+    name = via_tuple(run_id, phase_name, agent_type, scope)
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  def via_tuple(run_id, agent_type, scope) do
-    {:via, Registry, {Slidething.AgentRegistry, {run_id, agent_type, scope}}}
+  def via_tuple(run_id, phase_name, agent_type, scope) do
+    {:via, Registry, {Slidething.AgentRegistry, {run_id, phase_name, agent_type, scope}}}
   end
 
   def start_task(pid, task_description, context) do

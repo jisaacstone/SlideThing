@@ -53,7 +53,7 @@ defmodule Slidething.Agent.GenServerTest do
 
       assert [{^agent_pid, _}] = Registry.lookup(
         Slidething.AgentRegistry,
-        {run_id, :content, {:page, page_id}}
+        {run_id, nil, :content, {:page, page_id}}
       )
     end
 

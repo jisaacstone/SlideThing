@@ -27,4 +27,9 @@ defmodule SlidethingWeb.ElementController do
         conn |> put_status(404) |> json(%{error: "element not found"})
     end
   end
+
+  def delete(conn, %{"element_id" => element_id}) do
+    Element.delete(element_id)
+    json(conn, %{success: true})
+  end
 end

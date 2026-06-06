@@ -4,7 +4,7 @@ ELIXIR_BIN := $(HOME)/.asdf/installs/elixir/1.18.3/bin
 
 export PATH := $(ELIXIR_BIN):$(PATH)
 
-.PHONY: build build-elixir build-ui test lint typecheck format clean setup server
+.PHONY: build build-elixir build-ui test lint typecheck format clean setup server server-openrouter
 
 ## Build everything (Elixir + UI)
 build: build-elixir build-ui
@@ -40,6 +40,10 @@ typecheck:
 ## Start dev server
 server:
 	$(MIX) phx.server
+
+## Start dev server with OpenRouter (real LLM + image generation)
+server-openrouter:
+	SLIDETHING_AGENT_CONFIG=config/agents.openrouter.json $(MIX) phx.server
 
 ## Build UI + start server (most common dev workflow)
 dev: build-ui

@@ -17,7 +17,8 @@ defmodule Slidething.Agent do
       :system_prompt,
       :tools,
       :image_provider,
-      :image_model
+      :image_model,
+      tool_choice: nil
     ]
 
     @type t :: %__MODULE__{
@@ -30,7 +31,8 @@ defmodule Slidething.Agent do
             system_prompt: String.t(),
             tools: [atom()],
             image_provider: String.t() | nil,
-            image_model: String.t() | nil
+            image_model: String.t() | nil,
+            tool_choice: String.t() | nil
           }
   end
 

@@ -19,12 +19,14 @@ defmodule Slidething.Agent.Orchestrator do
   alias Slidething.Agent.{
     GeneratedPlan,
     InstructionBuilder,
+    Message,
     Phase,
     PlanContext,
     PlanExecutor,
     PlanPatcher,
     PlanValidator,
-    SubagentTask
+    SubagentTask,
+    ToolCall
   }
   alias Slidething.Agent.GenServer, as: AgentGenServer
 
@@ -139,6 +141,18 @@ defmodule Slidething.Agent.Orchestrator do
   # ── LLM task results (planner + coordinator) ──────────────────────────────
 
   @impl true
+  def handle_info({ref, {:error, reason}}, state) do
+    case Map.pop(state.pending_llm_tasks, ref) do
+      {nil, _} ->
+        {:noreply, state}
+
+      {_task, pending} ->
+        Process.demonitor(ref, [:flush])
+        Logger.error("[Orchestrator] LLM task failed: #{inspect(reason)}")
+        {:noreply, fail_run(%{state | pending_llm_tasks: pending}, reason)}
+    end
+  end
+
   def handle_info({ref, {:final_response, json}}, state) do
     case Map.pop(state.pending_llm_tasks, ref) do
       {nil, _} ->
@@ -245,7 +259,7 @@ defmodule Slidething.Agent.Orchestrator do
         end
 
       {:error, reason} ->
-        fail_run(state, "Invalid plan from planner: #{reason}")
+        fail_run(state, "Invalid plan from planner: #{inspect(reason)}")
     end
   end
 
@@ -367,9 +381,9 @@ defmodule Slidething.Agent.Orchestrator do
     planner_spec = Slidething.Agent.Config.agent_spec(:planner)
 
     task = Task.Supervisor.async_nolink(Slidething.IOTaskSupervisor, fn ->
-      Slidething.LLM.Client.complete_json(planner_spec, [
-        %Slidething.Agent.Message{role: :system, content: planner_spec.system_prompt},
-        %Slidething.Agent.Message{role: :user, content: instruction}
+      run_planner_loop(planner_spec, [
+        %Message{role: :system, content: planner_spec.system_prompt},
+        %Message{role: :user, content: instruction}
       ])
     end)
 
@@ -432,7 +446,7 @@ defmodule Slidething.Agent.Orchestrator do
 
     pending =
       Enum.reduce(tasks, state.pending_agents, fn task, acc ->
-        case start_agent(state.run_id, task.agent, task.scope, agent_spec) do
+        case start_agent(state.run_id, phase.name, task.agent, task.scope, agent_spec) do
           {:ok, pid} ->
             context = %{scope: AgentGenServer.scope_to_json(task.scope), task_count: length(tasks)}
             AgentGenServer.start_task(pid, task.instruction, context)
@@ -673,9 +687,10 @@ defmodule Slidething.Agent.Orchestrator do
     end
   end
 
-  defp start_agent(run_id, agent_type, scope, spec) do
+  defp start_agent(run_id, phase_name, agent_type, scope, spec) do
     opts = [
       run_id: run_id,
+      phase_name: phase_name,
       agent_type: agent_type,
       scope: scope,
       orchestrator_pid: self(),
@@ -704,14 +719,45 @@ defmodule Slidething.Agent.Orchestrator do
     instruction = build_initial_planner_prompt(state)
 
     task = Task.Supervisor.async_nolink(Slidething.IOTaskSupervisor, fn ->
-      Slidething.LLM.Client.complete_json(planner_spec, [
-        %Slidething.Agent.Message{role: :system, content: planner_spec.system_prompt},
-        %Slidething.Agent.Message{role: :user, content: instruction}
+      run_planner_loop(planner_spec, [
+        %Message{role: :system, content: planner_spec.system_prompt},
+        %Message{role: :user, content: instruction}
       ])
     end)
 
     broadcast_event(state, :phase_started, %{phase: :initial_planning})
     task.ref
+  end
+
+  defp run_planner_loop(spec, messages) do
+    case Slidething.LLM.Client.complete_json(spec, messages) do
+      {:final_response, json} ->
+        {:final_response, json}
+
+      {:tool_requests, calls} ->
+        results =
+          Enum.map(calls, fn %ToolCall{call_id: id, tool: t, args: a} ->
+            %{Slidething.Tool.Registry.execute(t, a) | call_id: id}
+          end)
+
+        # If submit_plan was called, extract and return the plan data
+        case Enum.find(results, &(&1.tool == :submit_plan)) do
+          %{success: true, data: plan_data} ->
+            {:final_response, plan_data}
+
+          nil ->
+            # Continue the loop with other tool results
+            assistant_msg = %Message{role: :assistant, content: "", tool_calls: calls}
+            tool_msg = %Message{role: :tool, tool_results: results}
+            run_planner_loop(spec, messages ++ [assistant_msg, tool_msg])
+
+          %{success: false, error: error} ->
+            {:error, "submit_plan failed: #{error}"}
+        end
+
+      {:error, _} = err ->
+        err
+    end
   end
 
   defp build_initial_planner_prompt(state) do
@@ -720,8 +766,13 @@ defmodule Slidething.Agent.Orchestrator do
     parts = if state.book_id do
       case Slidething.Book.get(state.book_id) do
         {:ok, book} ->
-          book_info = "Existing book:\n  id: #{state.book_id}\n  title: #{book.title}"
-          parts ++ [book_info]
+          meta = book.metadata || %{}
+          theme = meta["theme"] || meta[:theme]
+          audience = meta["target_audience"] || meta[:target_audience]
+          lines = ["Existing book:", "  id: #{state.book_id}", "  title: #{book.title}"]
+          lines = if theme, do: lines ++ ["  theme: #{theme}"], else: lines
+          lines = if audience, do: lines ++ ["  target_audience: #{audience}"], else: lines
+          parts ++ [Enum.join(lines, "\n")]
         _ ->
           parts
       end
@@ -731,9 +782,51 @@ defmodule Slidething.Agent.Orchestrator do
 
     parts = case state.target_type do
       "page" when not is_nil(state.target_id) ->
-        parts ++ ["Target page: #{state.target_id}"]
+        page_id = state.target_id
+        elements = Slidething.Element.list(page_id)
+
+        elements_text = if elements == [] do
+          "  (no elements yet)"
+        else
+          Enum.map_join(elements, "\n", fn el ->
+            version = el[:latest_version] || %{}
+            content = version[:content] || version["content"] || "(no content)"
+            "  [#{el.element_type}] #{el.id}: #{String.slice(to_string(content), 0, 100)}"
+          end)
+        end
+
+        recent_prompts = Slidething.Prompt.list_recent("page", page_id, 5)
+
+        prompts_text = if recent_prompts == [] do
+          nil
+        else
+          lines = Enum.map(recent_prompts, fn p ->
+            summary = if p.result_summary, do: " → #{String.slice(p.result_summary, 0, 80)}", else: ""
+            "  [#{p.status}] #{p.user_prompt}#{summary}"
+          end)
+          "Recent prompts for this page:\n" <> Enum.join(lines, "\n")
+        end
+
+        page_info = "Target page: #{page_id}\nExisting elements:\n#{elements_text}"
+        new_parts = parts ++ [page_info]
+        if prompts_text, do: new_parts ++ [prompts_text], else: new_parts
+
       "element" when not is_nil(state.target_id) ->
-        parts ++ ["Target element: #{state.target_id}"]
+        element_id = state.target_id
+        recent_prompts = Slidething.Prompt.list_recent("element", element_id, 5)
+
+        prompts_text = if recent_prompts == [] do
+          nil
+        else
+          lines = Enum.map(recent_prompts, fn p ->
+            "  [#{p.status}] #{p.user_prompt}"
+          end)
+          "Recent prompts for this element:\n" <> Enum.join(lines, "\n")
+        end
+
+        new_parts = parts ++ ["Target element: #{element_id}"]
+        if prompts_text, do: new_parts ++ [prompts_text], else: new_parts
+
       _ ->
         parts
     end
@@ -741,7 +834,18 @@ defmodule Slidething.Agent.Orchestrator do
     Enum.join(parts, "\n\n")
   end
 
-  defp parse_and_validate_plan(json_text) do
+  defp parse_and_validate_plan(plan_data) when is_map(plan_data) do
+    try do
+      with plan = GeneratedPlan.from_map(plan_data),
+           :ok <- PlanValidator.validate_plan!(plan.phases) do
+        {:ok, plan}
+      end
+    rescue
+      e -> {:error, Exception.message(e)}
+    end
+  end
+
+  defp parse_and_validate_plan(json_text) when is_binary(json_text) do
     try do
       with {:ok, map} <- parse_json_loosely_result(json_text),
            plan = GeneratedPlan.from_map(map),
@@ -753,32 +857,21 @@ defmodule Slidething.Agent.Orchestrator do
     end
   end
 
+  defp parse_and_validate_plan(other) do
+    {:error, "Invalid plan data: #{inspect(other)}"}
+  end
+
   defp parse_json_loosely(text) when is_binary(text) do
     case Jason.decode(text) do
       {:ok, decoded} -> decoded
-      _ ->
-        case Regex.run(~r/```(?:json)?\s*\n(.*?)\n```/s, text) do
-          [_, captured] ->
-            case Jason.decode(String.trim(captured)) do
-              {:ok, decoded} -> decoded
-              _ -> %{"raw" => text}
-            end
-          nil -> %{"raw" => text}
-        end
+      _ -> %{"raw" => text}
     end
   end
 
   defp parse_json_loosely(other), do: other
 
-  defp parse_json_loosely_result(text) do
-    case Jason.decode(text) do
-      {:ok, _} = ok -> ok
-      _ ->
-        case Regex.run(~r/```(?:json)?\s*\n(.*?)\n```/s, text) do
-          [_, captured] -> Jason.decode(String.trim(captured))
-          nil -> {:error, :no_json_found}
-        end
-    end
+  defp parse_json_loosely_result(text) when is_binary(text) do
+    Jason.decode(text)
   end
 
   # ── Run completion / failure ───────────────────────────────────────────────

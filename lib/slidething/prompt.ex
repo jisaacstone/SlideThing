@@ -113,6 +113,36 @@ defmodule Slidething.Prompt do
     {:ok, rows}
   end
 
+  @doc """
+  List recent prompts for a specific target (page or element).
+  Returns the most recent `limit` prompts, oldest first.
+  """
+  def list_recent(target_type, target_id, limit \\ 5) do
+    result =
+      query!(
+        """
+        SELECT id, user_prompt, result_summary, status, created_at
+        FROM prompts
+        WHERE target_type = ? AND target_id = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        [target_type, target_id, limit]
+      )
+
+    result.rows
+    |> Enum.map(fn [id, user_prompt, result_summary, status, created_at] ->
+      %{
+        id: id,
+        user_prompt: user_prompt,
+        result_summary: result_summary,
+        status: status,
+        created_at: created_at
+      }
+    end)
+    |> Enum.reverse()
+  end
+
   defp now_iso, do: DateTime.utc_now() |> DateTime.to_iso8601()
 
   defp query!(sql, args), do: Ecto.Adapters.SQL.query!(Repo, sql, args, log: :debug)

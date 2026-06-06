@@ -245,3 +245,8 @@ export async function moveElement(
   });
   if (!res.ok) throw new Error("move element failed");
 }
+
+export async function deleteElement(elementId: string): Promise<void> {
+  const res = await fetch(`/api/elements/${elementId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("delete element failed");
+}

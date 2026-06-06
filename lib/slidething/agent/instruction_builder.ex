@@ -24,7 +24,8 @@ defmodule Slidething.Agent.InstructionBuilder do
     parts = [
       "User request: #{user_prompt}",
       scope_description(scope, book_id),
-      phase_context(phase, phase_context_map)
+      phase_context(phase, phase_context_map),
+      phase_planner_context(phase)
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.reject(&(&1 == ""))
@@ -58,7 +59,6 @@ defmodule Slidething.Agent.InstructionBuilder do
       "User request: #{user_prompt}",
       planner_scope_description(scope, book_id),
       phase_context(phase, phase_context_map),
-      "Output JSON only. Do not call any tools."
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.reject(&(&1 == ""))
@@ -140,6 +140,12 @@ defmodule Slidething.Agent.InstructionBuilder do
   defp phase_context(phase, phase_context_map) do
     context_str = PlanExecutor.build_phase_context(phase, phase_context_map)
     if context_str == "", do: nil, else: context_str
+  end
+
+  defp phase_planner_context(%{context: nil}), do: nil
+  defp phase_planner_context(%{context: ctx}) when map_size(ctx) == 0, do: nil
+  defp phase_planner_context(%{context: ctx}) do
+    "=== Planner notes for this step ===\n#{Jason.encode!(ctx, pretty: true)}"
   end
 
   defp all_pages_summary([]), do: nil

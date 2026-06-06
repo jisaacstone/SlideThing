@@ -165,6 +165,19 @@ defmodule Slidething.Tool.Schemas do
         required: ["element_id", "asset_path"]
       }
     },
+    get_recent_prompts: %{
+      name: "get_recent_prompts",
+      description: "Get recent edit prompts for a specific page or element, newest last. Useful for understanding recent changes and intent.",
+      parameters: %{
+        type: "object",
+        properties: %{
+          target_type: %{type: "string", description: "The target type: 'page' or 'element'"},
+          target_id: %{type: "string", description: "The page or element ID"},
+          limit: %{type: "integer", description: "Max number of prompts to return (default 5)"}
+        },
+        required: ["target_type", "target_id"]
+      }
+    },
     propose_layout: %{
       name: "propose_layout",
       description: "Persist a layout for a (page, format) pair. element_layouts is an array of {element_id, x, y, width, height}; coordinates are 0..1 fractions of the format dimensions.",
@@ -190,6 +203,20 @@ defmodule Slidething.Tool.Schemas do
           }
         },
         required: ["page_id", "format_id", "element_layouts"]
+      }
+    },
+    submit_plan: %{
+      name: "submit_plan",
+      description: "Submit the execution plan. Call this ONCE at the end with your complete plan as JSON.",
+      parameters: %{
+        type: "object",
+        properties: %{
+          plan: %{
+            type: "object",
+            description: "The complete execution plan with book, pages, and phases"
+          }
+        },
+        required: ["plan"]
       }
     }
   }

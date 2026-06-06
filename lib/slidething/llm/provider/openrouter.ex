@@ -38,7 +38,9 @@ defmodule Slidething.LLM.Provider.OpenRouter do
       if Enum.empty?(agent_spec.tools) do
         body
       else
-        Map.put(body, :tools, build_openai_tools(agent_spec.tools))
+        body
+        |> Map.put(:tools, build_openai_tools(agent_spec.tools))
+        |> then(&(if agent_spec.tool_choice, do: Map.put(&1, :tool_choice, agent_spec.tool_choice), else: &1))
       end
 
     Logger.debug("[OpenRouter] Request: model=#{agent_spec.model}")

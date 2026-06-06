@@ -177,7 +177,8 @@ defmodule Slidething.Agent.Config do
       system_prompt: Map.get(attrs, "system_prompt", "You are a helpful assistant."),
       tools: Enum.map(Map.get(attrs, "tools", []), &String.to_atom/1),
       image_provider: Map.get(attrs, "image_provider", "mock"),
-      image_model: Map.get(attrs, "image_model", "mock-image-model")
+      image_model: Map.get(attrs, "image_model", "mock-image-model"),
+      tool_choice: Map.get(attrs, "tool_choice")
     }
   end
 

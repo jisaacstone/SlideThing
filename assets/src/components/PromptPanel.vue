@@ -25,6 +25,36 @@
       </div>
     </div>
 
+    <div v-if="showLog" class="run-log">
+      <div class="run-log-status">
+        <span v-if="isRunning" class="status-running">⏳ Running…</span>
+        <span v-else-if="runFinalStatus === 'done'" class="status-done">✓ Done</span>
+        <span v-else-if="runFinalStatus === 'failed'" class="status-failed">✗ Failed</span>
+      </div>
+      <div v-if="runFinalStatus === 'failed' && runFailReason" class="run-fail-reason">
+        {{ runFailReason }}
+      </div>
+      <div class="run-log-entries" ref="logEl">
+        <div v-for="(line, i) in liveLog" :key="i" class="run-log-line">{{ line }}</div>
+      </div>
+    </div>
+
+    <div v-if="targetType === 'element' && selectedElement" class="element-edit">
+      <div v-if="selectedElement && ['text', 'title'].includes(selectedElement.element_type)" class="content-editor">
+        <label class="editor-label">Content</label>
+        <textarea
+          v-model="elementContent"
+          class="content-textarea"
+          rows="4"
+          placeholder="Edit element content..."
+          @blur="saveElementContent"
+        ></textarea>
+      </div>
+      <button class="btn-secondary btn-danger" @click="deleteElement">
+        Delete element
+      </button>
+    </div>
+
     <div class="prompt-input-area">
       <textarea
         v-model="input"
@@ -44,8 +74,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, type PropType } from "vue";
-import type { PromptEntry } from "../api";
+import { ref, computed, watch, nextTick, type PropType } from "vue";
+import type { PromptEntry, ElementItem } from "../api";
 
 const props = defineProps({
   selectionLabel: { type: String, default: "" },
@@ -54,18 +84,47 @@ const props = defineProps({
   bookId: { type: String, default: "" },
   prompts: { type: Array as PropType<PromptEntry[]>, default: () => [] },
   isRunning: { type: Boolean, default: false },
+  liveLog: { type: Array as PropType<string[]>, default: () => [] },
+  runFinalStatus: { type: String as PropType<"idle" | "done" | "failed">, default: "idle" },
+  runFailReason: { type: String, default: "" },
+  selectedElement: { type: Object as PropType<ElementItem | null>, default: null },
 });
+
+const showLog = computed(() => props.isRunning || props.runFinalStatus !== "idle");
+const logEl = ref<HTMLElement | null>(null);
+
+watch(
+  () => props.liveLog.length,
+  () => nextTick(() => { if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight })
+);
 
 const emit = defineEmits<{
   close: [];
   submit: [prompt: string, targetType: string, targetId: string];
+  delete: [targetId: string];
+  updateContent: [elementId: string, content: string];
 }>();
 
 const input = ref("");
+const elementContent = ref("");
 
 watch(
   () => props.targetId,
-  () => { input.value = ""; }
+  () => {
+    input.value = "";
+    elementContent.value = "";
+  }
+);
+
+watch(
+  () => props.selectedElement,
+  (el) => {
+    if (el && el.latest_version?.content) {
+      elementContent.value = el.latest_version.content;
+    } else {
+      elementContent.value = "";
+    }
+  }
 );
 
 function submit() {
@@ -77,6 +136,16 @@ function submit() {
 
 function editPrompt(p: PromptEntry) {
   input.value = p.user_prompt;
+}
+
+function deleteElement() {
+  emit("delete", props.targetId);
+}
+
+function saveElementContent() {
+  if (props.selectedElement && elementContent.value !== (props.selectedElement.latest_version?.content || "")) {
+    emit("updateContent", props.selectedElement.id, elementContent.value);
+  }
 }
 
 function truncate(text: string, max: number) {
@@ -179,6 +248,55 @@ function formatDate(iso: string) {
   color: var(--text-muted);
 }
 
+.run-log {
+  border-top: 1px solid var(--border);
+  padding: 10px 16px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.run-log-status {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.status-running {
+  color: var(--text-muted);
+}
+
+.status-done {
+  color: #4caf50;
+}
+
+.status-failed {
+  color: #f44336;
+}
+
+.run-fail-reason {
+  font-size: 11px;
+  color: #f44336;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.run-log-entries {
+  max-height: 160px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.run-log-line {
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--text-muted);
+  white-space: pre;
+  line-height: 1.5;
+}
+
 .prompt-input-area {
   padding: 12px 16px 16px;
   border-top: 1px solid var(--border);
@@ -200,6 +318,84 @@ function formatDate(iso: string) {
 }
 
 .prompt-input-area textarea:focus {
+  border-color: var(--primary);
+}
+
+.element-actions {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.btn-secondary {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-danger {
+  border-color: #f44336;
+  color: #f44336;
+}
+
+.btn-danger:hover:not(:disabled) {
+  border-color: #d32f2f;
+  color: #d32f2f;
+  background: rgba(244, 67, 54, 0.05);
+}
+
+.element-edit {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.content-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.editor-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.content-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+  resize: none;
+  outline: none;
+  background: var(--card-bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.content-textarea:focus {
   border-color: var(--primary);
 }
 </style>

@@ -217,7 +217,7 @@ defmodule Slidething.Agent.FlowsTest do
       assert length(elements) > 0, "new page should have elements written by page_pipeline"
     end
 
-    test "coordinator and validate_book still run for the new page", %{
+    test "content and layout phases run for the new page", %{
       pid: pid,
       book_id: book_id
     } do
@@ -226,9 +226,9 @@ defmodule Slidething.Agent.FlowsTest do
       events = collect_events_until(:completed, @run_timeout)
       phase_names = phase_names_from(events, :phase_completed)
 
-      assert "process_pages"  in phase_names
-      assert "review_book"    in phase_names
-      assert "validate_book"  in phase_names
+      assert "generate_content" in phase_names
+      assert "generate_layout"  in phase_names
+      assert "validate_layout"  in phase_names
     end
   end
 
@@ -379,7 +379,7 @@ defmodule Slidething.Agent.FlowsTest do
     } do
       # Override coordinator to return a patch adding a revision phase
       Slidething.Agent.Config.set(:coordinator, [])
-      patch_response = Jason.encode!(%{
+      _patch_response = Jason.encode!(%{
         "context" => %{"assessment" => "page 1 needs revision"},
         "plan_patches" => [
           %{

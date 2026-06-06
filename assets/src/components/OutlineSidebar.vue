@@ -40,7 +40,10 @@
     </div>
 
     <div v-else class="outline-view">
-      <h3 class="outline-book-title">{{ bookTitle }}</h3>
+      <div class="outline-book-header">
+        <h3 class="outline-book-title">{{ bookTitle }}</h3>
+        <button class="btn-ghost book-prompt-btn" @click="$emit('book-prompt')" title="Book-level prompt">✏</button>
+      </div>
       <span class="outline-page-count">{{ pages.length }} pages</span>
 
       <button class="btn-ghost new-page-btn" @click="showAddPageDialog = true">+ New Page</button>
@@ -105,6 +108,7 @@ const emit = defineEmits<{
   "add-page": [title: string, prompt: string];
   "delete-page": [pageId: string];
   "delete-book": [];
+  "book-prompt": [];
 }>();
 
 const newBookTitle = ref("");
@@ -226,10 +230,37 @@ watch(
   padding: 0 16px 16px;
 }
 
+.outline-book-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
 .outline-book-title {
   font-size: 15px;
   font-weight: 600;
-  margin-bottom: 2px;
+  margin-bottom: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.book-prompt-btn {
+  background: none;
+  border: none;
+  color: var(--sidebar-text-muted);
+  font-size: 14px;
+  padding: 2px 4px;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.book-prompt-btn:hover {
+  color: var(--sidebar-text);
+  opacity: 1;
 }
 
 .outline-page-count {

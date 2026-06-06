@@ -58,6 +58,12 @@ defmodule Slidething.Tool.Registry do
     %{pages: pages}
   end
 
+  defp do_execute(:get_recent_prompts, %{"target_type" => target_type, "target_id" => target_id} = args) do
+    limit = args["limit"] || 5
+    prompts = Slidething.Prompt.list_recent(target_type, target_id, limit)
+    %{prompts: prompts}
+  end
+
   # Content tools
   defp do_execute(:get_page_elements, %{"page_id" => page_id}) do
     elements = Slidething.Element.list(page_id)
@@ -170,6 +176,11 @@ defmodule Slidething.Tool.Registry do
       end)
 
     %{issue_count: length(issue_maps), issues: issue_maps}
+  end
+
+  # Planner output tool
+  defp do_execute(:submit_plan, %{"plan" => plan}) when is_map(plan) do
+    plan
   end
 
   # Unknown tool
