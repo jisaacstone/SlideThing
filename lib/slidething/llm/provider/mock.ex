@@ -9,140 +9,70 @@ defmodule Slidething.LLM.Provider.Mock do
   alias Slidething.Agent.{AgentSpec, Message, ToolCall}
 
   @impl true
-  def complete_json(%AgentSpec{name: :planner}, messages) do
-    # If we have tool results, use them to generate a smarter plan.
-    # Otherwise, call get_page_elements on the target page (if targeting one).
-    has_tool_results? = Enum.any?(messages, &(&1.role == :tool))
-
-    if has_tool_results? do
-      # Parse tool results to decide which phases to include
-      existing_elements = extract_elements_from_tool_results(messages)
-      has_content? = Enum.any?(existing_elements, fn el ->
-        el["element_type"] in ["title", "text"] || el[:element_type] in ["title", "text"]
-      end)
-
-      # Determine if we're targeting an existing page
-      existing_book? = Enum.any?(messages, fn msg ->
-        is_binary(msg.content) and String.contains?(msg.content, "Existing book:")
-      end)
-
-      pages =
-        if existing_book? do
-          [%{"position" => 1, "metadata" => %{"description" => "Page in existing book"}}]
-        else
-          [
-            %{"position" => 1, "metadata" => %{"description" => "Introduction"}},
-            %{"position" => 2, "metadata" => %{"description" => "Development"}},
-            %{"position" => 3, "metadata" => %{"description" => "Resolution"}}
-          ]
-        end
-
-      phases = if has_content? do
-        # Page already has text content — skip generate_content, just layout + media
-        [
-          %{"name" => "generate_layout", "step_type" => "agent", "agent_type" => "layout",
-            "scope" => "per_page", "depends_on" => [], "condition" => nil, "max_retries" => 2,
-            "context" => %{"note" => "Page already has text content — only arrange existing elements"}},
-          %{"name" => "generate_media", "step_type" => "agent", "agent_type" => "media",
-            "scope" => "per_element", "depends_on" => ["generate_layout"], "condition" => nil, "max_retries" => 2,
-            "context" => nil},
-          %{"name" => "validate_layout", "step_type" => "validator", "agent_type" => "validator",
-            "scope" => "per_page", "depends_on" => ["generate_layout"], "condition" => nil, "max_retries" => 1,
-            "context" => nil},
-          %{"name" => "repair_layout", "step_type" => "agent", "agent_type" => "layout",
-            "scope" => "per_page", "depends_on" => ["validate_layout"], "condition" => "has_layout_issues", "max_retries" => 2,
-            "context" => nil}
-        ]
-      else
-        # No existing content — run full pipeline
-        [
-          %{"name" => "generate_content", "step_type" => "agent", "agent_type" => "content",
-            "scope" => "per_page", "depends_on" => [], "condition" => nil, "max_retries" => 2,
-            "context" => nil},
-          %{"name" => "generate_layout", "step_type" => "agent", "agent_type" => "layout",
-            "scope" => "per_page", "depends_on" => ["generate_content"], "condition" => nil, "max_retries" => 2,
-            "context" => nil},
-          %{"name" => "generate_media", "step_type" => "agent", "agent_type" => "media",
-            "scope" => "per_element", "depends_on" => ["generate_layout"], "condition" => nil, "max_retries" => 2,
-            "context" => nil},
-          %{"name" => "validate_layout", "step_type" => "validator", "agent_type" => "validator",
-            "scope" => "per_page", "depends_on" => ["generate_layout"], "condition" => nil, "max_retries" => 1,
-            "context" => nil},
-          %{"name" => "repair_layout", "step_type" => "agent", "agent_type" => "layout",
-            "scope" => "per_page", "depends_on" => ["validate_layout"], "condition" => "has_layout_issues", "max_retries" => 2,
-            "context" => nil}
-        ]
-      end
-
-      plan = %{
-        "book" => %{
-          "title" => "Mock Children's Book",
-          "metadata" => %{"theme" => "adventure", "target_audience" => "ages 4-6", "style" => "watercolor"}
-        },
-        "pages" => pages,
-        "phases" => phases
+  def complete_json(%AgentSpec{name: :planner}, _messages) do
+    plan = %{
+      "context" => %{
+        "theme" => "adventure",
+        "assessment" => "Theme and outline decided"
       }
+    }
+    {:tool_requests, [%ToolCall{call_id: "planner_0", tool: :submit_plan, args: %{"plan" => plan}}]}
+  end
 
-      {:final_response, Jason.encode!(plan)}
+  def complete_json(%AgentSpec{name: :planner_decide}, messages) do
+    # Decide if context gathering is needed
+    has_existing_book? = Enum.any?(messages, fn msg ->
+      is_binary(msg.content) and String.contains?(msg.content, "Existing book:")
+    end)
+
+    {:final_response, Jason.encode!(%{"needs_context" => has_existing_book?})}
+  end
+
+  def complete_json(%AgentSpec{name: :planner_gather}, _messages) do
+    # Return a summary of gathered context
+    {:final_response, "Book has 3 pages. Pages 1-3 have partial content. Recent prompts show layout and media work needed."}
+  end
+
+  def complete_json(%AgentSpec{name: :planner_emit}, messages) do
+    existing_book? = Enum.any?(messages, fn msg ->
+      is_binary(msg.content) and String.contains?(msg.content, "Existing book:")
+    end)
+
+    plan = if existing_book? do
+      %{
+        "context" => "Edit existing page content and layout",
+        "phases" => [
+          %{"name" => "generate_content", "step_type" => "agent", "agent_type" => "content",
+            "scope" => "per_page", "depends_on" => [], "condition" => nil, "max_retries" => 2, "context" => nil},
+          %{"name" => "generate_layout", "step_type" => "agent", "agent_type" => "layout",
+            "scope" => "per_page", "depends_on" => ["generate_content"], "condition" => nil, "max_retries" => 2, "context" => nil},
+          %{"name" => "generate_media", "step_type" => "agent", "agent_type" => "media",
+            "scope" => "per_element", "depends_on" => ["generate_layout"], "condition" => nil, "max_retries" => 2, "context" => nil},
+          %{"name" => "validate_layout", "step_type" => "validator", "agent_type" => "validator",
+            "scope" => "per_page", "depends_on" => ["generate_layout"], "condition" => nil, "max_retries" => 1, "context" => nil},
+          %{"name" => "repair_layout", "step_type" => "agent", "agent_type" => "layout",
+            "scope" => "per_page", "depends_on" => ["validate_layout"], "condition" => "has_layout_issues", "max_retries" => 2, "context" => nil}
+        ]
+      }
     else
-      # First turn: fetch page elements if we have a target page
-      page_id = extract_target_page_id(messages)
-
-      if page_id do
-        tool_call("p0", :get_page_elements, %{"page_id" => page_id})
-      else
-        # No specific page target.
-        # For existing books: add 1 page with standard pipeline.
-        # For new books: use multi-planner flow (decide_theme → assign_outline → process_pages).
-        existing_book? = Enum.any?(messages, fn msg ->
-          is_binary(msg.content) and String.contains?(msg.content, "Existing book:")
-        end)
-
-        if existing_book? do
-          plan = %{
-            "book" => %{
-              "title" => "Mock Children's Book",
-              "metadata" => %{"theme" => "adventure", "target_audience" => "ages 4-6", "style" => "watercolor"}
-            },
-            "pages" => [%{"position" => 1, "metadata" => %{"description" => "New page added to book"}}],
-            "phases" => [
-              %{"name" => "generate_content", "step_type" => "agent", "agent_type" => "content",
-                "scope" => "per_page", "depends_on" => [], "condition" => nil, "max_retries" => 2, "context" => nil},
-              %{"name" => "generate_layout", "step_type" => "agent", "agent_type" => "layout",
-                "scope" => "per_page", "depends_on" => ["generate_content"], "condition" => nil, "max_retries" => 2, "context" => nil},
-              %{"name" => "generate_media", "step_type" => "agent", "agent_type" => "media",
-                "scope" => "per_element", "depends_on" => ["generate_layout"], "condition" => nil, "max_retries" => 2, "context" => nil},
-              %{"name" => "validate_layout", "step_type" => "validator", "agent_type" => "validator",
-                "scope" => "per_page", "depends_on" => ["generate_layout"], "condition" => nil, "max_retries" => 1, "context" => nil},
-              %{"name" => "repair_layout", "step_type" => "agent", "agent_type" => "layout",
-                "scope" => "per_page", "depends_on" => ["validate_layout"], "condition" => "has_layout_issues", "max_retries" => 2, "context" => nil}
-            ]
-          }
-          {:final_response, Jason.encode!(plan)}
-        else
-          # Fresh book creation — use multi-planner flow
-          plan = %{
-            "book" => %{
-              "title" => "Mock Children's Book",
-              "metadata" => %{"theme" => "adventure", "target_audience" => "ages 4-6", "style" => "watercolor"}
-            },
-            "pages" => [
-              %{"position" => 1, "metadata" => %{"description" => "Introduction"}},
-              %{"position" => 2, "metadata" => %{"description" => "Development"}},
-              %{"position" => 3, "metadata" => %{"description" => "Resolution"}}
-            ],
-            "phases" => [
-              %{"name" => "decide_theme",   "step_type" => "planner",     "agent_type" => "planner",       "scope" => "book",     "depends_on" => [],                "condition" => nil, "max_retries" => 1, "context" => nil},
-              %{"name" => "assign_outline", "step_type" => "planner",     "agent_type" => "planner",       "scope" => "book",     "depends_on" => ["decide_theme"],   "condition" => nil, "max_retries" => 1, "context" => nil},
-              %{"name" => "process_pages",  "step_type" => "agent",       "agent_type" => "page_pipeline", "scope" => "per_page", "depends_on" => ["assign_outline"], "condition" => nil, "max_retries" => 2, "context" => nil},
-              %{"name" => "review_book",    "step_type" => "coordinator", "agent_type" => "coordinator",   "scope" => "book",     "depends_on" => ["process_pages"],  "condition" => nil, "max_retries" => 1, "context" => nil},
-              %{"name" => "validate_book",  "step_type" => "validator",   "agent_type" => "validator",     "scope" => "per_page", "depends_on" => ["review_book"],    "condition" => nil, "max_retries" => 1, "context" => nil}
-            ]
-          }
-          {:final_response, Jason.encode!(plan)}
-        end
-      end
+      %{
+        "context" => "Create new book with semantic phases",
+        "phases" => [
+          %{"name" => "decide_theme", "step_type" => "planner", "agent_type" => "planner",
+            "scope" => "book", "depends_on" => [], "condition" => nil, "max_retries" => 1, "context" => nil},
+          %{"name" => "assign_outline", "step_type" => "planner", "agent_type" => "planner",
+            "scope" => "book", "depends_on" => ["decide_theme"], "condition" => nil, "max_retries" => 1, "context" => nil},
+          %{"name" => "process_pages", "step_type" => "agent", "agent_type" => "page_pipeline",
+            "scope" => "per_page", "depends_on" => ["assign_outline"], "condition" => nil, "max_retries" => 2, "context" => nil},
+          %{"name" => "review_book", "step_type" => "coordinator", "agent_type" => "coordinator",
+            "scope" => "book", "depends_on" => ["process_pages"], "condition" => nil, "max_retries" => 1, "context" => nil},
+          %{"name" => "validate_book", "step_type" => "validator", "agent_type" => "validator",
+            "scope" => "per_page", "depends_on" => ["review_book"], "condition" => nil, "max_retries" => 1, "context" => nil}
+        ]
+      }
     end
+
+    {:tool_requests, [%ToolCall{call_id: "emit_0", tool: :submit_plan, args: %{"plan" => plan}}]}
   end
 
   def complete_json(%AgentSpec{name: :page_pipeline}, messages) do
@@ -458,28 +388,4 @@ defmodule Slidething.LLM.Provider.Mock do
     end
   end
 
-  defp extract_target_page_id(messages) do
-    Enum.find_value(messages, fn msg ->
-      if is_binary(msg.content) do
-        case Regex.run(~r/Target page: (page_[a-z0-9_-]+)/, msg.content) do
-          [_, id] -> id
-          _ -> nil
-        end
-      end
-    end)
-  end
-
-  defp extract_elements_from_tool_results(messages) do
-    messages
-    |> Enum.reverse()
-    |> Enum.find_value(fn
-      %Message{role: :tool, tool_results: results} ->
-        Enum.find_value(results, fn
-          %{tool: :get_page_elements, success: true, data: %{elements: els}} -> els
-          %{tool: :get_page_elements, success: true, data: %{"elements" => els}} -> els
-          _ -> nil
-        end)
-      _ -> nil
-    end) || []
-  end
 end

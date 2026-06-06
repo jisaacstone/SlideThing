@@ -178,9 +178,14 @@ defmodule Slidething.Tool.Registry do
     %{issue_count: length(issue_maps), issues: issue_maps}
   end
 
-  # Planner output tool
-  defp do_execute(:submit_plan, %{"plan" => plan}) when is_map(plan) do
+  # Planner output tool — accept plan nested under "plan" key or at top level
+  defp do_execute(:submit_plan, %{"plan" => plan}) when is_map(plan) and map_size(plan) > 0 do
     plan
+  end
+
+  defp do_execute(:submit_plan, args) when is_map(args) and map_size(args) > 0 do
+    # Model passed the plan fields directly rather than nesting under "plan"
+    args
   end
 
   # Unknown tool

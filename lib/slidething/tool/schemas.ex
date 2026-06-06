@@ -207,13 +207,35 @@ defmodule Slidething.Tool.Schemas do
     },
     submit_plan: %{
       name: "submit_plan",
-      description: "Submit the execution plan. Call this ONCE at the end with your complete plan as JSON.",
+      description: "Submit the execution plan. Call this once with your complete plan.",
       parameters: %{
         type: "object",
         properties: %{
           plan: %{
             type: "object",
-            description: "The complete execution plan with book, pages, and phases"
+            description: "The execution plan with context and phases.",
+            properties: %{
+              context: %{type: "string", description: "Optional shared background for all agents: theme, constraints, style notes."},
+              phases: %{
+                type: "array",
+                description: "List of phases to execute, with dependency graph.",
+                items: %{
+                  type: "object",
+                  properties: %{
+                    name: %{type: "string", description: "Unique phase name"},
+                    step_type: %{type: "string", description: "agent | validator | coordinator | planner"},
+                    agent_type: %{type: "string", description: "content | layout | media | validator | coordinator | planner | page_pipeline"},
+                    scope: %{type: "string", description: "book | per_page | per_element"},
+                    depends_on: %{type: "array", items: %{type: "string"}, description: "List of phase names this depends on"},
+                    condition: %{type: ["string", "null"], description: "Condition to gate execution: null or has_layout_issues"},
+                    max_retries: %{type: "integer", description: "Max retries for this phase"},
+                    context: %{type: "object", description: "Optional context/notes for the agent"}
+                  },
+                  required: ["name", "step_type", "agent_type", "scope", "depends_on"]
+                }
+              }
+            },
+            required: ["phases"]
           }
         },
         required: ["plan"]

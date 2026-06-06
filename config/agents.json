@@ -15,6 +15,15 @@
     }
   },
   "agents": {
+    "planner": {
+      "provider": "mock",
+      "model": "mock-model",
+      "temperature": 0.2,
+      "max_tokens": 4000,
+      "max_iterations": 10,
+      "system_prompt": "You are a children's book semantic planner. Make high-level decisions about theme, structure, or coherence.",
+      "tools": ["get_book", "get_outline", "submit_plan"]
+    },
     "planner_decide": {
       "provider": "mock",
       "model": "mock-model",
@@ -40,7 +49,7 @@
       "max_tokens": 4000,
       "max_iterations": 1,
       "tool_choice": "required",
-      "system_prompt": "You are creating an execution plan for a children's book editor. You have the user request and gathered context. Call submit_plan once with the complete plan as a single JSON object.\n\nAvailable phase types:\n- agent / content / per_page — write or update text elements (title, body text, image descriptions)\n- agent / layout / per_page — propose element positions as fractional rectangles\n- agent / media / per_element — generate images for image elements that have no asset\n- validator / validator / per_page — run layout validation rules\n- agent / layout / per_page + condition:\"has_layout_issues\" — repair layout after validation\n\nDecision rules:\n- If the page already has a title and body text AND the request is NOT about rewriting text, skip generate_content.\n- If the request is illustration-only (add/change an image), skip generate_content entirely.\n- If no images are expected or requested, skip generate_media.\n- Always include generate_layout when content or images change.\n- Include validate_layout + repair_layout when layout quality matters.\n\nPlan JSON schema:\n{\n  \"book\": {\"title\": string, \"metadata\": {\"theme\": string, \"target_audience\": string, \"style\": string}},\n  \"pages\": [{\"position\": int, \"metadata\": {\"description\": string}}],\n  \"phases\": [\n    {\n      \"name\": string,\n      \"step_type\": \"agent\" | \"validator\" | \"planner\" | \"coordinator\",\n      \"agent_type\": \"content\" | \"layout\" | \"media\" | \"validator\" | \"planner\" | \"coordinator\",\n      \"scope\": \"book\" | \"per_page\" | \"per_element\",\n      \"depends_on\": [string],\n      \"condition\": null | \"has_layout_issues\",\n      \"max_retries\": int,\n      \"context\": null | {}\n    }\n  ]\n}",
+      "system_prompt": "You are creating an execution plan for a children's book editor. You have the user request and gathered context. Call submit_plan once with the complete plan.\n\nAvailable phase types:\n- agent / content / per_page — write or update text elements (title, body text, image descriptions)\n- agent / layout / per_page — propose element positions as fractional rectangles\n- agent / media / per_element — generate images for image elements that have no asset\n- validator / validator / per_page — run layout validation rules\n- agent / layout / per_page + condition:\"has_layout_issues\" — repair layout after validation\n\nDecision rules:\n- If the page already has a title and body text AND the request is NOT about rewriting text, skip generate_content.\n- If the request is illustration-only (add/change an image), skip generate_content entirely.\n- If no images are expected or requested, skip generate_media.\n- Always include generate_layout when content or images change.\n- Include validate_layout + repair_layout when layout quality matters.\n\nPlan JSON schema:\n{\n  \"context\": \"optional string shared with all agents\",\n  \"phases\": [\n    {\n      \"name\": string,\n      \"step_type\": \"agent\" | \"validator\" | \"planner\" | \"coordinator\",\n      \"agent_type\": \"content\" | \"layout\" | \"media\" | \"validator\" | \"planner\" | \"coordinator\" | \"page_pipeline\",\n      \"scope\": \"book\" | \"per_page\" | \"per_element\",\n      \"depends_on\": [string],\n      \"condition\": null | \"has_layout_issues\",\n      \"max_retries\": int,\n      \"context\": null | {}\n    }\n  ]\n}",
       "tools": ["submit_plan"]
     },
     "content": {

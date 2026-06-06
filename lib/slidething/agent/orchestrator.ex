@@ -233,9 +233,11 @@ defmodule Slidething.Agent.Orchestrator do
 
   # Initial planner result (status: :planning)
   defp handle_planner_result(%{status: :planning} = state, _phase_name, plan_json) do
+    Logger.debug("[Planner] Emit result: #{inspect(plan_json, limit: 5000)}")
     case parse_and_validate_plan(plan_json) do
       {:ok, plan} ->
-        case create_book_and_pages(plan, state) do
+        Logger.debug("[Planner] Phases: #{inspect(Enum.map(plan.phases, & &1.name))}")
+        case setup_pages_for_plan(plan, state) do
           {:ok, book_id, page_ids} ->
             new_state = %{state
               | generated_plan: plan,
@@ -255,7 +257,7 @@ defmodule Slidething.Agent.Orchestrator do
             schedule_next_phases(new_state)
 
           {:error, reason} ->
-            fail_run(state, "Failed to create book: #{inspect(reason)}")
+            fail_run(state, "Failed to setup pages: #{inspect(reason)}")
         end
 
       {:error, reason} ->
@@ -381,7 +383,7 @@ defmodule Slidething.Agent.Orchestrator do
     planner_spec = Slidething.Agent.Config.agent_spec(:planner)
 
     task = Task.Supervisor.async_nolink(Slidething.IOTaskSupervisor, fn ->
-      run_planner_loop(planner_spec, [
+      run_planner_step_loop(planner_spec, [
         %Message{role: :system, content: planner_spec.system_prompt},
         %Message{role: :user, content: instruction}
       ])
@@ -591,44 +593,31 @@ defmodule Slidething.Agent.Orchestrator do
 
   # ── Book + page creation ───────────────────────────────────────────────────
 
-  defp create_book_and_pages(plan, state) do
+  defp setup_pages_for_plan(plan, state) do
     if state.book_id do
-      if state.target_type && state.target_id do
-        # Targeting a specific existing page — use it as-is, no new pages
-        page_ids = filter_page_ids([state.target_id], state)
-        {:ok, state.book_id, page_ids}
+      if state.target_type == "page" && state.target_id do
+        # Targeting a specific page — use only that page
+        {:ok, state.book_id, [state.target_id]}
       else
-        # Adding pages to an existing book — create new pages per the plan
-        count = if plan.page_specs, do: length(plan.page_specs), else: 1
-        {:ok, new_page_ids} = Slidething.Book.create_pages(state.book_id, count)
-        {:ok, state.book_id, new_page_ids}
+        # Adding pages to an existing book — always create new ones
+        has_per_page = Enum.any?(plan.phases, &(&1.scope == :per_page))
+        page_count = if has_per_page, do: 1, else: 0
+        case Slidething.Book.create_pages(state.book_id, page_count) do
+          {:ok, page_ids} -> {:ok, state.book_id, page_ids}
+          err -> err
+        end
       end
     else
-      with book_struct = plan.book_structure || %{title: "Untitled", metadata: %{}},
-           {:ok, %{book_id: book_id}} <- Slidething.Book.create(book_struct.title, book_struct.metadata),
-           _ <- Slidething.Book.add_format(book_id, @default_format_id),
-           {:ok, page_ids} <- create_pages(book_id, plan.page_specs) do
-        {:ok, book_id, page_ids}
+      # New book: create with defaults, then create pages based on plan
+      has_per_page = Enum.any?(plan.phases, &(&1.scope == :per_page))
+      page_count = if has_per_page, do: 3, else: 1
+      with {:ok, %{book_id: new_book_id}} <- Slidething.Book.create("Untitled", %{}),
+           _ <- Slidething.Book.add_format(new_book_id, @default_format_id),
+           {:ok, page_ids} <- Slidething.Book.create_pages(new_book_id, page_count) do
+        {:ok, new_book_id, page_ids}
       end
     end
   end
-
-  defp create_pages(book_id, nil) do
-    Slidething.Book.create_pages(book_id, 1)
-  end
-
-  defp create_pages(book_id, page_specs) when is_list(page_specs) do
-    entries = Enum.map(page_specs, fn p ->
-      %{position: p.position, metadata: p.metadata || %{}}
-    end)
-    Slidething.Book.create_pages(book_id, entries)
-  end
-
-  defp filter_page_ids(all_page_ids, %{target_type: "page", target_id: page_id}) when not is_nil(page_id) do
-    Enum.filter(all_page_ids, &(&1 == page_id))
-  end
-
-  defp filter_page_ids(all_page_ids, _state), do: all_page_ids
 
   # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -715,52 +704,43 @@ defmodule Slidething.Agent.Orchestrator do
   # ── Plan parsing ───────────────────────────────────────────────────────────
 
   defp call_planner(state) do
-    planner_spec = Slidething.Agent.Config.agent_spec(:planner)
-    instruction = build_initial_planner_prompt(state)
-
     task = Task.Supervisor.async_nolink(Slidething.IOTaskSupervisor, fn ->
-      run_planner_loop(planner_spec, [
-        %Message{role: :system, content: planner_spec.system_prompt},
-        %Message{role: :user, content: instruction}
-      ])
+      run_planner_phases(state)
     end)
 
     broadcast_event(state, :phase_started, %{phase: :initial_planning})
     task.ref
   end
 
-  defp run_planner_loop(spec, messages) do
-    case Slidething.LLM.Client.complete_json(spec, messages) do
-      {:final_response, json} ->
-        {:final_response, json}
+  defp run_planner_phases(state) do
+    static_context = build_static_context(state)
 
-      {:tool_requests, calls} ->
-        results =
-          Enum.map(calls, fn %ToolCall{call_id: id, tool: t, args: a} ->
-            %{Slidething.Tool.Registry.execute(t, a) | call_id: id}
-          end)
+    # Phase A: Decide — check if context gathering is needed
+    needs_context =
+      if is_nil(state.book_id) do
+        false
+      else
+        run_decide_phase(static_context)
+      end
 
-        # If submit_plan was called, extract and return the plan data
-        case Enum.find(results, &(&1.tool == :submit_plan)) do
-          %{success: true, data: plan_data} ->
-            {:final_response, plan_data}
+    Logger.debug("[Planner] Phase A (decide): needs_context=#{needs_context}")
 
-          nil ->
-            # Continue the loop with other tool results
-            assistant_msg = %Message{role: :assistant, content: "", tool_calls: calls}
-            tool_msg = %Message{role: :tool, tool_results: results}
-            run_planner_loop(spec, messages ++ [assistant_msg, tool_msg])
+    # Phase B: Gather — collect detailed context if needed
+    gathered_context =
+      if needs_context do
+        run_gather_phase(state, static_context)
+      else
+        ""
+      end
 
-          %{success: false, error: error} ->
-            {:error, "submit_plan failed: #{error}"}
-        end
+    Logger.debug("[Planner] Phase B (gather): completed")
 
-      {:error, _} = err ->
-        err
-    end
+    # Phase C: Emit — generate the plan using submit_plan
+    emit_prompt = build_emit_prompt(static_context, gathered_context)
+    run_emit_phase(emit_prompt)
   end
 
-  defp build_initial_planner_prompt(state) do
+  defp build_static_context(state) do
     parts = ["User request: #{state.prompt}"]
 
     parts = if state.book_id do
@@ -795,43 +775,141 @@ defmodule Slidething.Agent.Orchestrator do
           end)
         end
 
-        recent_prompts = Slidething.Prompt.list_recent("page", page_id, 5)
-
-        prompts_text = if recent_prompts == [] do
-          nil
-        else
-          lines = Enum.map(recent_prompts, fn p ->
-            summary = if p.result_summary, do: " → #{String.slice(p.result_summary, 0, 80)}", else: ""
-            "  [#{p.status}] #{p.user_prompt}#{summary}"
-          end)
-          "Recent prompts for this page:\n" <> Enum.join(lines, "\n")
-        end
-
-        page_info = "Target page: #{page_id}\nExisting elements:\n#{elements_text}"
-        new_parts = parts ++ [page_info]
-        if prompts_text, do: new_parts ++ [prompts_text], else: new_parts
+        parts ++ ["Target page: #{page_id}\nExisting elements:\n#{elements_text}"]
 
       "element" when not is_nil(state.target_id) ->
-        element_id = state.target_id
-        recent_prompts = Slidething.Prompt.list_recent("element", element_id, 5)
-
-        prompts_text = if recent_prompts == [] do
-          nil
-        else
-          lines = Enum.map(recent_prompts, fn p ->
-            "  [#{p.status}] #{p.user_prompt}"
-          end)
-          "Recent prompts for this element:\n" <> Enum.join(lines, "\n")
-        end
-
-        new_parts = parts ++ ["Target element: #{element_id}"]
-        if prompts_text, do: new_parts ++ [prompts_text], else: new_parts
+        parts ++ ["Target element: #{state.target_id}"]
 
       _ ->
         parts
     end
 
     Enum.join(parts, "\n\n")
+  end
+
+  defp run_decide_phase(static_context) do
+    spec = Slidething.Agent.Config.agent_spec(:planner_decide)
+
+    case Slidething.LLM.Client.complete_json(spec, [
+      %Message{role: :system, content: spec.system_prompt},
+      %Message{role: :user, content: static_context}
+    ]) do
+      {:final_response, text} ->
+        case Jason.decode(text) do
+          {:ok, %{"needs_context" => v}} when is_boolean(v) -> v
+          _ -> true
+        end
+
+      _ ->
+        true
+    end
+  end
+
+  defp run_gather_phase(_state, static_context) do
+    spec = Slidething.Agent.Config.agent_spec(:planner_gather)
+
+    messages = [
+      %Message{role: :system, content: spec.system_prompt},
+      %Message{role: :user, content: static_context}
+    ]
+
+    case run_gather_loop(spec, messages) do
+      {:final_response, summary_text} -> summary_text
+      {:error, _reason} -> ""
+      _ -> ""
+    end
+  end
+
+  defp run_gather_loop(spec, messages) do
+    case Slidething.LLM.Client.complete_json(spec, messages) do
+      {:final_response, text} ->
+        {:final_response, text}
+
+      {:tool_requests, calls} ->
+        results =
+          Enum.map(calls, fn %ToolCall{call_id: id, tool: t, args: a} ->
+            %{Slidething.Tool.Registry.execute(t, a) | call_id: id}
+          end)
+
+        assistant_msg = %Message{role: :assistant, content: "", tool_calls: calls}
+        tool_msg = %Message{role: :tool, tool_results: results}
+        run_gather_loop(spec, messages ++ [assistant_msg, tool_msg])
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp build_emit_prompt(static_context, gathered_context) do
+    parts = [static_context]
+    parts = if gathered_context != "", do: parts ++ ["\nGathered context:\n" <> gathered_context], else: parts
+    Enum.join(parts, "\n\n")
+  end
+
+  defp run_emit_phase(emit_prompt) do
+    spec = Slidething.Agent.Config.agent_spec(:planner_emit)
+
+    case Slidething.LLM.Client.complete_json(spec, [
+      %Message{role: :system, content: spec.system_prompt},
+      %Message{role: :user, content: emit_prompt}
+    ]) do
+      {:tool_requests, calls} ->
+        Enum.each(calls, fn %ToolCall{tool: t, args: a} ->
+          Logger.debug("[Planner] Emit tool call: #{t} args=#{inspect(a, limit: 3000)}")
+        end)
+
+        results =
+          Enum.map(calls, fn %ToolCall{call_id: id, tool: t, args: a} ->
+            %{Slidething.Tool.Registry.execute(t, a) | call_id: id}
+          end)
+
+        case Enum.find(results, &(&1.tool == :submit_plan)) do
+          %{success: true, data: plan_data} ->
+            {:final_response, plan_data}
+
+          %{success: false, error: error} ->
+            {:error, "submit_plan failed: #{error}"}
+
+          nil ->
+            {:error, "emit phase did not call submit_plan"}
+        end
+
+      {:final_response, text} ->
+        {:error, "emit phase returned text instead of submit_plan: #{String.slice(text, 0, 100)}"}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # Mid-execution planner step loop (for coordinator/repair phases)
+  defp run_planner_step_loop(spec, messages) do
+    case Slidething.LLM.Client.complete_json(spec, messages) do
+      {:final_response, json} ->
+        {:final_response, json}
+
+      {:tool_requests, calls} ->
+        results =
+          Enum.map(calls, fn %ToolCall{call_id: id, tool: t, args: a} ->
+            %{Slidething.Tool.Registry.execute(t, a) | call_id: id}
+          end)
+
+        case Enum.find(results, &(&1.tool == :submit_plan)) do
+          %{success: true, data: plan_data} ->
+            {:final_response, plan_data}
+
+          nil ->
+            assistant_msg = %Message{role: :assistant, content: "", tool_calls: calls}
+            tool_msg = %Message{role: :tool, tool_results: results}
+            run_planner_step_loop(spec, messages ++ [assistant_msg, tool_msg])
+
+          %{success: false, error: error} ->
+            {:error, "submit_plan failed: #{error}"}
+        end
+
+      {:error, _} = err ->
+        err
+    end
   end
 
   defp parse_and_validate_plan(plan_data) when is_map(plan_data) do

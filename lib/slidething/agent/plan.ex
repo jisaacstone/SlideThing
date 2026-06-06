@@ -65,29 +65,16 @@ defmodule Slidething.Agent.GeneratedPlan do
   Contains book + page structure to create, and a list of phases to execute.
   """
 
-  defstruct [:book_structure, :page_specs, :phases]
+  defstruct [:context, :phases]
 
   @type t :: %__MODULE__{
-          book_structure: %{title: String.t(), metadata: map()} | nil,
-          page_specs: [%{position: integer(), metadata: map()}] | nil,
+          context: String.t() | nil,
           phases: [Slidething.Agent.Phase.t()]
         }
 
   @doc "Parse from decoded JSON map."
   def from_map(map) do
-    book = case map["book"] do
-      nil -> nil
-      b -> %{title: b["title"] || "Untitled", metadata: b["metadata"] || %{}}
-    end
-
-    pages = case map["pages"] do
-      nil -> nil
-      ps when is_list(ps) ->
-        Enum.map(ps, fn p ->
-          %{position: p["position"] || 1, metadata: p["metadata"] || %{}}
-        end)
-      _ -> nil
-    end
+    context = map["context"]
 
     phases = case map["phases"] do
       nil -> []
@@ -95,7 +82,7 @@ defmodule Slidething.Agent.GeneratedPlan do
       _ -> []
     end
 
-    %__MODULE__{book_structure: book, page_specs: pages, phases: phases}
+    %__MODULE__{context: context, phases: phases}
   end
 
   def phase_from_map(p) do
