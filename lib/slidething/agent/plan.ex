@@ -76,11 +76,15 @@ defmodule Slidething.Agent.GeneratedPlan do
   def from_map(map) do
     context = map["context"]
 
-    phases = case map["phases"] do
-      nil -> []
-      ps when is_list(ps) -> Enum.map(ps, &phase_from_map/1)
-      _ -> []
-    end
+    phases =
+      case map["phases"] do
+        nil -> []
+        ps when is_list(ps) ->
+          ps
+          |> Enum.map(&phase_from_map/1)
+          |> Enum.uniq_by(& &1.name)
+        _ -> []
+      end
 
     %__MODULE__{context: context, phases: phases}
   end
