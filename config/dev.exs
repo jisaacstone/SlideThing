@@ -12,7 +12,11 @@ config :slidething, SlidethingWeb.Endpoint,
   debug_errors: true,
   secret_key_base: "6HZRL06k+Dx9bCp6rzjivlHiA2G4YlxnvB17E+53eBwIxQjPO/JNXOpeD7x3qmUb",
   watchers: [
-    npm: ["run", "dev", "--", "--host", cd: Path.expand("../assets", __DIR__)]
+    node: [
+      "node_modules/.bin/vite",
+      "--host",
+      cd: Path.expand("../assets", __DIR__)
+    ]
   ]
 
 config :slidething, dev_routes: true
