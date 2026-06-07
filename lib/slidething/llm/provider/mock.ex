@@ -59,9 +59,9 @@ defmodule Slidething.LLM.Provider.Mock do
               "context" => nil
             },
             %{
-              "name" => "generate_layout",
+              "name" => "generate_media",
               "step_type" => "agent",
-              "agent_type" => "layout",
+              "agent_type" => "media",
               "scope" => "per_page",
               "depends_on" => ["generate_content"],
               "condition" => nil,
@@ -69,11 +69,11 @@ defmodule Slidething.LLM.Provider.Mock do
               "context" => nil
             },
             %{
-              "name" => "generate_media",
+              "name" => "generate_layout",
               "step_type" => "agent",
-              "agent_type" => "media",
-              "scope" => "per_element",
-              "depends_on" => ["generate_layout"],
+              "agent_type" => "layout",
+              "scope" => "per_page",
+              "depends_on" => ["generate_media"],
               "condition" => nil,
               "max_retries" => 2,
               "context" => nil
@@ -125,11 +125,31 @@ defmodule Slidething.LLM.Provider.Mock do
               "context" => nil
             },
             %{
-              "name" => "process_pages",
+              "name" => "generate_content",
               "step_type" => "agent",
-              "agent_type" => "page_pipeline",
+              "agent_type" => "content",
               "scope" => "per_page",
               "depends_on" => ["assign_outline"],
+              "condition" => nil,
+              "max_retries" => 2,
+              "context" => nil
+            },
+            %{
+              "name" => "generate_media",
+              "step_type" => "agent",
+              "agent_type" => "media",
+              "scope" => "per_page",
+              "depends_on" => ["generate_content"],
+              "condition" => nil,
+              "max_retries" => 2,
+              "context" => nil
+            },
+            %{
+              "name" => "generate_layout",
+              "step_type" => "agent",
+              "agent_type" => "layout",
+              "scope" => "per_page",
+              "depends_on" => ["generate_media"],
               "condition" => nil,
               "max_retries" => 2,
               "context" => nil
@@ -139,7 +159,7 @@ defmodule Slidething.LLM.Provider.Mock do
               "step_type" => "coordinator",
               "agent_type" => "coordinator",
               "scope" => "book",
-              "depends_on" => ["process_pages"],
+              "depends_on" => ["generate_layout"],
               "condition" => nil,
               "max_retries" => 1,
               "context" => nil
@@ -159,73 +179,6 @@ defmodule Slidething.LLM.Provider.Mock do
       end
 
     {:tool_requests, [%ToolCall{call_id: "emit_0", tool: :submit_plan, args: %{"plan" => plan}}]}
-  end
-
-  def complete_json(%AgentSpec{name: :page_pipeline}, messages) do
-    iteration = count_iterations(messages)
-    page_id = extract_page_scope_id(messages)
-    existing_image_id = extract_existing_image_id(messages)
-
-    if existing_image_id do
-      # Update-image flow: just update the existing element then finish
-      case iteration do
-        0 ->
-          tool_call("pp_0", :update_element, %{
-            "element_id" => existing_image_id,
-            "content" => "Vibrant fox in forest with sunset colors"
-          })
-
-        _ ->
-          {:final_response, "Page complete for #{page_id}"}
-      end
-    else
-      case iteration do
-        0 ->
-          tool_call("pp_0", :create_element, %{
-            "page_id" => page_id || "page-unknown",
-            "element_type" => "title",
-            "content" => "Mock title for #{page_id}"
-          })
-
-        1 ->
-          tool_call("pp_1", :create_element, %{
-            "page_id" => page_id || "page-unknown",
-            "element_type" => "text",
-            "content" => "Once upon a time on #{page_id}, a brave fox set off on an adventure."
-          })
-
-        2 ->
-          tool_call("pp_2", :propose_layout, %{
-            "page_id" => page_id || "page-unknown",
-            "format_id" => "format-web",
-            "element_layouts" => [
-              %{
-                "element_id" => "title-placeholder",
-                "x" => 0.1,
-                "y" => 0.05,
-                "width" => 0.8,
-                "height" => 0.1
-              },
-              %{
-                "element_id" => "text-placeholder",
-                "x" => 0.1,
-                "y" => 0.18,
-                "width" => 0.8,
-                "height" => 0.3
-              }
-            ]
-          })
-
-        3 ->
-          tool_call("pp_3", :validate_page, %{
-            "page_id" => page_id || "page-unknown",
-            "format_id" => "format-web"
-          })
-
-        _ ->
-          {:final_response, "Page complete for #{page_id}"}
-      end
-    end
   end
 
   def complete_json(%AgentSpec{name: :coordinator}, _messages) do
@@ -262,63 +215,12 @@ defmodule Slidething.LLM.Provider.Mock do
       1 ->
         tool_call("content_call_1", :create_element, %{
           "page_id" => page_id,
-          "element_type" => "image",
-          "content" => "Mock image prompt for #{page_id}"
-        })
-
-      2 ->
-        tool_call("content_call_2", :create_element, %{
-          "page_id" => page_id,
           "element_type" => "text",
           "content" => "Mock body text for #{page_id}"
         })
 
       _ ->
         {:final_response, "Content creation complete for #{page_id}"}
-    end
-  end
-
-  def complete_json(%AgentSpec{name: :media}, messages) do
-    iteration = count_iterations(messages)
-
-    cond do
-      iteration == 0 ->
-        prompt = extract_user_content(messages) || "mock image"
-        aspect = extract_aspect_ratio(messages) || "1:1"
-
-        {:tool_requests,
-         [
-           %ToolCall{
-             call_id: "media_call_0",
-             tool: :generate_image,
-             args: %{"prompt" => prompt, "aspect_ratio" => aspect}
-           }
-         ]}
-
-      iteration == 1 ->
-        element_id = extract_element_id(messages)
-        asset_path = extract_asset_path(messages)
-        prompt = extract_user_content(messages) || "mock image"
-
-        if element_id && asset_path do
-          {:tool_requests,
-           [
-             %ToolCall{
-               call_id: "media_call_1",
-               tool: :store_asset,
-               args: %{
-                 "element_id" => element_id,
-                 "asset_path" => asset_path,
-                 "prompt" => prompt
-               }
-             }
-           ]}
-        else
-          {:final_response, "Media generation complete"}
-        end
-
-      true ->
-        {:final_response, "Media generation complete"}
     end
   end
 
@@ -408,52 +310,6 @@ defmodule Slidething.LLM.Provider.Mock do
     end
   end
 
-  defp extract_user_content(messages) do
-    Enum.find_value(messages, fn
-      %Message{role: :user, content: content} -> content
-      _ -> nil
-    end)
-  end
-
-  defp extract_aspect_ratio(messages) do
-    content = extract_user_content(messages) || ""
-
-    case Regex.run(~r/(\d+:\d+)/, content) do
-      [_, ratio] -> ratio
-      _ -> nil
-    end
-  end
-
-  defp extract_element_id(messages) do
-    messages
-    |> Enum.find_value(fn
-      %Message{role: :user, content: content} when is_binary(content) ->
-        case Regex.run(~r/(elem_[0-9a-f-]+)/, content) do
-          [_, eid] -> eid
-          _ -> nil
-        end
-
-      _ ->
-        nil
-    end)
-  end
-
-  defp extract_asset_path(messages) do
-    messages
-    |> Enum.reverse()
-    |> Enum.find_value(fn
-      %Message{role: :tool, tool_results: results} ->
-        Enum.find_value(results, fn
-          %{tool: :generate_image, success: true, data: %{asset_path: ap}} -> ap
-          %{tool: :generate_image, success: true, data: %{"asset_path" => ap}} -> ap
-          _ -> nil
-        end)
-
-      _ ->
-        nil
-    end)
-  end
-
   defp extract_page_elements(messages) do
     messages
     |> Enum.reverse()
@@ -470,17 +326,12 @@ defmodule Slidething.LLM.Provider.Mock do
     end) || []
   end
 
-  defp extract_existing_image_id(messages) do
-    content = extract_user_content(messages) || ""
-
-    case Regex.run(~r/\[image\] (elem_[a-z0-9_-]+)/, content) do
-      [_, id] -> id
-      _ -> nil
-    end
-  end
-
   defp extract_format_id(messages) do
-    content = extract_user_content(messages) || ""
+    content =
+      Enum.find_value(messages, fn
+        %Message{role: :user, content: c} -> c
+        _ -> nil
+      end) || ""
 
     case Regex.run(~r/format "([^"]+)"|format_id="([^"]+)"/, content) do
       [_, a, ""] -> a

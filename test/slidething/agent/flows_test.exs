@@ -59,40 +59,39 @@ defmodule Slidething.Agent.FlowsTest do
       assert length(pages) == data.page_count
     end
 
-    test "semantic book-level planner phases run before process_pages", %{pid: pid} do
+    test "semantic book-level planner phases run before content phases", %{pid: pid} do
       Orchestrator.start_run(pid, "Create a 3-page book about a fox", nil)
 
       events = collect_events_until(:completed, @run_timeout)
       phase_names = phase_names_from(events, :phase_completed)
 
-      # Book-level planner phases complete before process_pages
       decide_idx = Enum.find_index(phase_names, &(&1 == "decide_theme"))
       assign_idx = Enum.find_index(phase_names, &(&1 == "assign_outline"))
-      process_idx = Enum.find_index(phase_names, &(&1 == "process_pages"))
+      content_idx = Enum.find_index(phase_names, &(&1 == "generate_content"))
 
       assert decide_idx != nil, "expected decide_theme to complete"
       assert assign_idx != nil, "expected assign_outline to complete"
-      assert process_idx != nil, "expected process_pages to complete"
+      assert content_idx != nil, "expected generate_content to complete"
 
       assert decide_idx < assign_idx, "decide_theme must complete before assign_outline"
-      assert assign_idx < process_idx, "assign_outline must complete before process_pages"
+      assert assign_idx < content_idx, "assign_outline must complete before generate_content"
     end
 
-    test "coordinator runs after process_pages and before validate_book", %{pid: pid} do
+    test "coordinator runs after layout and before validate_book", %{pid: pid} do
       Orchestrator.start_run(pid, "Create a 3-page book about a fox", nil)
 
       events = collect_events_until(:completed, @run_timeout)
       phase_names = phase_names_from(events, :phase_completed)
 
-      process_idx = Enum.find_index(phase_names, &(&1 == "process_pages"))
+      layout_idx = Enum.find_index(phase_names, &(&1 == "generate_layout"))
       review_idx = Enum.find_index(phase_names, &(&1 == "review_book"))
       validate_idx = Enum.find_index(phase_names, &(&1 == "validate_book"))
 
-      assert process_idx != nil, "expected process_pages to complete"
+      assert layout_idx != nil, "expected generate_layout to complete"
       assert review_idx != nil, "expected review_book to complete"
       assert validate_idx != nil, "expected validate_book to complete"
 
-      assert process_idx < review_idx, "process_pages must complete before review_book"
+      assert layout_idx < review_idx, "generate_layout must complete before review_book"
       assert review_idx < validate_idx, "review_book must complete before validate_book"
     end
 

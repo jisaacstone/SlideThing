@@ -6,7 +6,6 @@ defmodule Slidething.Agent.API do
   """
 
   alias Slidething.Agent.Orchestrator
-  alias Slidething.Agent.GenServer, as: AgentGenServer
 
   @doc """
   Start a new agent run.
@@ -62,30 +61,6 @@ defmodule Slidething.Agent.API do
   end
 
   @doc """
-  Get all running agent processes for a run.
-
-  Returns a list of {agent_type, scope, pid} tuples.
-  """
-  def get_agents(run_id) do
-    Registry.select(Slidething.AgentRegistry, [
-      {{{:"$1", :"$2", :"$3"}, :"$4", :_}, [{:==, :"$1", run_id}], [{{:"$2", :"$3", :"$4"}}]}
-    ])
-  end
-
-  @doc """
-  Get the state of a specific agent.
-  """
-  def get_agent_state(run_id, agent_type, scope \\ nil) do
-    case Registry.lookup(Slidething.AgentRegistry, {run_id, agent_type, scope}) do
-      [{pid, _}] ->
-        AgentGenServer.get_state(pid)
-
-      [] ->
-        :not_found
-    end
-  end
-
-  @doc """
   Subscribe to all events (orchestrator and agent) for a specific run.
 
   Subscribers receive `{:run_event, %{...}}` from the orchestrator and
@@ -94,12 +69,6 @@ defmodule Slidething.Agent.API do
   def subscribe(run_id) do
     Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
   end
-
-  @doc false
-  def subscribe_to_run(run_id), do: subscribe(run_id)
-
-  @doc false
-  def subscribe_to_agent_events(run_id), do: subscribe(run_id)
 
   @doc """
   List all active runs.

@@ -21,7 +21,7 @@
       "temperature": 0.2,
       "max_tokens": 4000,
       "max_iterations": 10,
-      "system_prompt": "You are a children's book semantic planner. Make high-level decisions about theme, structure, or coherence.",
+      "system_prompt": "You are a semantic planner. Make high-level decisions about theme, structure, or coherence.",
       "tools": ["get_book", "get_outline", "submit_plan"]
     },
     "planner_decide": {
@@ -30,7 +30,7 @@
       "temperature": 0.0,
       "max_tokens": 256,
       "max_iterations": 1,
-      "system_prompt": "You are planning context for a children's book editor. Given the user request and known book state, decide if you need to look up more details before planning.\n\nRespond with JSON only:\n{\"needs_context\": true}\nor\n{\"needs_context\": false}\n\nChoose false when: the request is a new book creation, or the request is already clear and the book state (title, page count) is sufficient.\nChoose true when: the request is to edit an existing page/element, or you need to understand current content/layout.",
+      "system_prompt": "You are planning context for a content editor. Given the user request and known book state, decide if you need to look up more details before planning.\n\nRespond with JSON only:\n{\"needs_context\": true}\nor\n{\"needs_context\": false}\n\nChoose false when: the request is a new book creation, or the request is already clear and the book state (title, page count) is sufficient.\nChoose true when: the request is to edit an existing page/element, or you need to understand current content/layout.",
       "tools": []
     },
     "planner_gather": {
@@ -39,8 +39,8 @@
       "temperature": 0.0,
       "max_tokens": 2000,
       "max_iterations": 5,
-      "system_prompt": "You are gathering context for a children's book edit plan. Call the available tools to understand the current state of pages and elements, then write a plain-text summary of what you found.\n\nTools available:\n- get_book(book_id) — get book title and metadata\n- get_outline(book_id) — get page structure\n- get_page_elements(page_id) — get elements on a specific page\n- get_recent_prompts(target_type, target_id, limit) — see recent edit history\n\nOutput text only — no JSON, no plan yet.",
-      "tools": ["get_book", "get_outline", "get_page_elements", "get_recent_prompts"]
+      "system_prompt": "You are gathering context for an edit plan. Call the available tools to understand the current state of pages and elements, then write a plain-text summary of what you found.\n\nTools available:\n- get_outline(book_id) — get page structure\n- get_page_elements(page_id) — get elements on a specific page\n- get_element(element_id) — get a specific element\n- get_recent_prompts(target_type, target_id, limit) — see recent edit history\n\nOutput text only — no JSON, no plan yet.",
+      "tools": ["get_outline", "get_page_elements", "get_element", "get_recent_prompts"]
     },
     "planner_emit": {
       "provider": "mock",
@@ -49,7 +49,7 @@
       "max_tokens": 4000,
       "max_iterations": 1,
       "tool_choice": "required",
-      "system_prompt": "You are creating an execution plan for a children's book editor. You have the user request and gathered context. Call submit_plan once with the complete plan.\n\nAvailable phase types:\n- agent / content / per_page — write or update text elements (title, body text, image descriptions)\n- agent / layout / per_page — propose element positions as fractional rectangles\n- agent / media / per_element — generate images for image elements that have no asset\n- validator / validator / per_page — run layout validation rules\n- agent / layout / per_page + condition:\"has_layout_issues\" — repair layout after validation\n\nDecision rules:\n- If the page already has a title and body text AND the request is NOT about rewriting text, skip generate_content.\n- If the request is illustration-only (add/change an image), skip generate_content entirely.\n- If no images are expected or requested, skip generate_media.\n- Always include generate_layout when content or images change.\n- Include validate_layout + repair_layout when layout quality matters.\n\nPlan JSON schema:\n{\n  \"context\": \"optional string shared with all agents\",\n  \"phases\": [\n    {\n      \"name\": string,\n      \"step_type\": \"agent\" | \"validator\" | \"planner\" | \"coordinator\",\n      \"agent_type\": \"content\" | \"layout\" | \"media\" | \"validator\" | \"planner\" | \"coordinator\" | \"page_pipeline\",\n      \"scope\": \"book\" | \"per_page\" | \"per_element\",\n      \"depends_on\": [string],\n      \"condition\": null | \"has_layout_issues\",\n      \"max_retries\": int,\n      \"context\": null | {}\n    }\n  ]\n}",
+      "system_prompt": "You are creating an execution plan for a content editor. You have the user request and gathered context. Call submit_plan once with the complete plan.\n\nAvailable phase types:\n- agent / content / per_page — write or update text elements (title, body text, captions)\n- agent / layout / per_page — propose element positions as fractional rectangles\n- agent / media / per_page — generate an image for the page based on its text content\n- validator / validator / per_page — run layout validation rules\n- agent / layout / per_page + condition:\"has_layout_issues\" — repair layout after validation\n\nDecision rules:\n- If the page already has a title and body text AND the request is NOT about rewriting text, skip generate_content.\n- If the target element type is 'image', do NOT include a generate_content phase — the content agent only handles text elements.\n- If no images are expected or requested, skip generate_media.\n- generate_media MUST always depend on generate_content (if present) so the image is informed by the page text.\n- generate_layout MUST depend on both generate_content and generate_media (if present) so it sees all elements.\n- Always include generate_layout when content or images change.\n- repair_layout phases MUST include condition: \"has_layout_issues\" — without it the phase always runs regardless of validator output.\n\nPlan JSON schema:\n{\n  \"context\": \"optional string shared with all agents\",\n  \"phases\": [\n    {\n      \"name\": string,\n      \"step_type\": \"agent\" | \"validator\" | \"planner\" | \"coordinator\",\n      \"agent_type\": \"content\" | \"layout\" | \"media\" | \"validator\" | \"planner\" | \"coordinator\",\n      \"scope\": \"book\" | \"per_page\",\n      \"depends_on\": [string],\n      \"condition\": null | \"has_layout_issues\",\n      \"max_retries\": int,\n      \"context\": null | {}\n    }\n  ]\n}",
       "tools": ["submit_plan"]
     },
     "content": {
@@ -58,8 +58,8 @@
       "temperature": 0.7,
       "max_tokens": 4000,
       "max_iterations": 15,
-      "system_prompt": "You are a content writer for a children's book. You write the actual text content for book pages.\n\nYOUR JOB:\n1. Use get_page_elements to see what already exists on the page.\n2. Use create_element to add text elements. Use element_type 'title' for page titles, 'text' for body text, 'caption' for image captions.\n3. You can use update_element to revise content if needed.\n\nELEMENT TYPES:\n- 'title': The page heading, short and engaging\n- 'text': The main body text, age-appropriate, warm children's book voice\n- 'image': An image description/prompt (for the media agent to generate later)\n- 'caption': Short text under an image\n\nEach page should have a clear structure: title, body text, and optionally captions. Keep text concise and age-appropriate. Write in a warm, engaging children's book voice. Create ALL needed elements before returning your final response.",
-      "tools": ["get_page_elements", "get_element", "create_element", "update_element"]
+      "system_prompt": "You are a content writer. You write the actual text content for pages.\n\nThe page's existing elements are provided in your context. Use create_element to add new text elements, or update_element to revise existing ones.\n\nELEMENT TYPES:\n- 'title': The page heading, short and engaging\n- 'text': The main body text\n- 'caption': Short text under an image\n\nDo NOT create image elements — the media agent handles image creation.\n\nEach page should have a title and body text, and optionally captions. Keep text concise and clear. Create ALL needed elements before returning your final response.",
+      "tools": ["create_element", "update_element"]
     },
     "research": {
       "provider": "mock",
@@ -67,7 +67,7 @@
       "temperature": 0.3,
       "max_tokens": 4000,
       "max_iterations": 5,
-      "system_prompt": "You are a research agent for children's book creation. You make project-wide decisions about theme, audience, and style.",
+      "system_prompt": "You are a research agent for content creation. You make project-wide decisions about theme, audience, and style.",
       "tools": ["get_book", "get_outline", "update_book_metadata", "update_page_metadata"]
     },
     "layout": {
@@ -80,26 +80,8 @@
       "tools": ["get_page_elements", "get_format", "get_element", "propose_layout"]
     },
     "media": {
-      "provider": "mock",
-      "model": "mock-model",
       "image_provider": "mock",
-      "image_model": "mock-image-model",
-      "temperature": 0.5,
-      "max_tokens": 4000,
-      "max_iterations": 5,
-      "system_prompt": "You are an image generation specialist. You create one image per task by calling generate_image with a refined prompt (combining the element description with the book style) and the requested aspect_ratio, then store the result with store_asset on the target element.",
-      "tools": ["get_element", "get_format", "generate_image", "store_asset"]
-    },
-    "page_pipeline": {
-      "provider": "mock",
-      "model": "mock-model",
-      "image_provider": "mock",
-      "image_model": "mock-image-model",
-      "temperature": 0.6,
-      "max_tokens": 8000,
-      "max_iterations": 20,
-      "system_prompt": "You are a page production agent for a children's book. You own the full pipeline for one page: writing, layout, image generation, and self-validation.\n\nYOUR JOB — iterate until the page is complete:\n1. Use get_page_elements to see what already exists.\n2. Write or update text elements (title, body) using create_element / update_element.\n3. If the page has an image, generate it with generate_image + store_asset.\n4. Propose a layout using propose_layout (x, y, width, height as 0..1 fractions, safe margin ≥ 0.1).\n5. Validate with validate_page. Fix any issues returned, then validate again.\n6. When validate_page returns issue_count: 0 (or only minor warnings you judge acceptable), return a final response.\n\nYou have context from the book outline — use it to write content that fits this page's assigned section.",
-      "tools": ["get_page_elements", "create_element", "update_element", "get_format", "propose_layout", "generate_image", "store_asset", "validate_page"]
+      "image_model": "mock-image-model"
     },
     "coordinator": {
       "provider": "mock",
@@ -107,7 +89,7 @@
       "temperature": 0.2,
       "max_tokens": 8000,
       "max_iterations": 1,
-      "system_prompt": "You are a book coherence reviewer. You read the full content of a children's book and assess whether the pages are consistent in tone, character descriptions, narrative arc, and visual style.\n\nOutput JSON with two keys:\n  \"context\": { your assessment }\n  \"plan_patches\": [ patch operations to fix problems, or [] if the book is coherent ]\n\nOnly add revision phases when there are genuine consistency issues. Prefer targeted patches (specific pages) over broad rewrites. Do NOT add coordinator phases. Output JSON only.",
+      "system_prompt": "You are a coherence reviewer. You read the full content of a book and assess whether the pages are consistent in tone, terminology, narrative arc, and visual style.\n\nOutput JSON with two keys:\n  \"context\": { your assessment }\n  \"plan_patches\": [ patch operations to fix problems, or [] if the book is coherent ]\n\nOnly add revision phases when there are genuine consistency issues. Prefer targeted patches (specific pages) over broad rewrites. Do NOT add coordinator phases. Output JSON only.",
       "tools": []
     }
   }

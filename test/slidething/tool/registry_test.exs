@@ -204,53 +204,6 @@ defmodule Slidething.Tool.RegistryTest do
     end
   end
 
-  describe "generate_image" do
-    test "stores a mock image and returns its asset_path" do
-      result =
-        Slidething.Tool.Registry.execute(:generate_image, %{
-          "prompt" => "A penguin flying"
-        })
-
-      assert %ToolResult{success: true} = result
-      assert result.data.prompt == "A penguin flying"
-      assert result.data.aspect_ratio == "1:1"
-      assert is_binary(result.data.asset_path)
-      assert String.ends_with?(result.data.asset_path, ".png")
-      assert File.exists?(Slidething.AssetStore.full_path(result.data.asset_path))
-    end
-
-    test "respects custom aspect_ratio" do
-      result =
-        Slidething.Tool.Registry.execute(:generate_image, %{
-          "prompt" => "Test",
-          "aspect_ratio" => "16:9"
-        })
-
-      assert %ToolResult{success: true} = result
-      assert result.data.aspect_ratio == "16:9"
-    end
-  end
-
-  describe "store_asset" do
-    test "attaches asset to element as a new version", %{page_id: page_id} do
-      {:ok, elem} = Slidething.Element.create(page_id, "image", "a duck")
-
-      result =
-        Slidething.Tool.Registry.execute(:store_asset, %{
-          "element_id" => elem.element_id,
-          "asset_path" => "abc.png",
-          "prompt" => "a duck swimming"
-        })
-
-      assert %ToolResult{success: true} = result
-      assert result.data.version == 2
-
-      {:ok, fetched} = Slidething.Element.get(elem.element_id)
-      latest = List.last(fetched.versions)
-      assert latest.asset_path == "abc.png"
-    end
-  end
-
   describe "propose_layout" do
     test "persists a layout version for the page", %{page_id: page_id} do
       {:ok, e1} = Slidething.Element.create(page_id, "title", "Hello")

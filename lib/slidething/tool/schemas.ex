@@ -154,36 +154,6 @@ defmodule Slidething.Tool.Schemas do
         required: ["format_id"]
       }
     },
-    generate_image: %{
-      name: "generate_image",
-      description:
-        "Generate an image from a prompt at the given aspect ratio. Returns an asset_path stored on disk. Follow with store_asset to attach it to the element.",
-      parameters: %{
-        type: "object",
-        properties: %{
-          prompt: %{type: "string", description: "Detailed image generation prompt"},
-          aspect_ratio: %{
-            type: "string",
-            description:
-              "Aspect ratio: one of '1:1', '9:16', '16:9', '3:4', '4:3'. Defaults to 1:1."
-          }
-        },
-        required: ["prompt"]
-      }
-    },
-    store_asset: %{
-      name: "store_asset",
-      description: "Store a generated image as an element version on a page",
-      parameters: %{
-        type: "object",
-        properties: %{
-          element_id: %{type: "string", description: "The element ID to attach the asset to"},
-          asset_path: %{type: "string", description: "Path returned by generate_image"},
-          prompt: %{type: "string", description: "The prompt used to generate the image"}
-        },
-        required: ["element_id", "asset_path"]
-      }
-    },
     get_recent_prompts: %{
       name: "get_recent_prompts",
       description:
@@ -226,6 +196,19 @@ defmodule Slidething.Tool.Schemas do
         required: ["page_id", "format_id", "element_layouts"]
       }
     },
+    validate_page: %{
+      name: "validate_page",
+      description:
+        "Validate the layout of a page. Returns issue_count and a list of issues with severity, rule, and message.",
+      parameters: %{
+        type: "object",
+        properties: %{
+          page_id: %{type: "string", description: "The page ID to validate"},
+          format_id: %{type: "string", description: "The format ID, e.g. 'format-web'"}
+        },
+        required: ["page_id"]
+      }
+    },
     submit_plan: %{
       name: "submit_plan",
       description: "Submit the execution plan. Call this once with your complete plan.",
@@ -254,10 +237,9 @@ defmodule Slidething.Tool.Schemas do
                     },
                     agent_type: %{
                       type: "string",
-                      description:
-                        "content | layout | media | validator | coordinator | planner | page_pipeline"
+                      description: "content | layout | media | validator | coordinator | planner"
                     },
-                    scope: %{type: "string", description: "book | per_page | per_element"},
+                    scope: %{type: "string", description: "book | per_page"},
                     depends_on: %{
                       type: "array",
                       items: %{type: "string"},

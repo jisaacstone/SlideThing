@@ -29,7 +29,9 @@ defmodule Slidething.Book do
   """
   def create_pages(book_id, count_or_list)
 
-  def create_pages(book_id, count) when is_integer(count) do
+  def create_pages(_book_id, 0), do: {:ok, []}
+
+  def create_pages(book_id, count) when is_integer(count) and count > 0 do
     entries = Enum.map(1..count, &%{position: &1, metadata: %{}})
     create_pages(book_id, entries)
   end

@@ -32,7 +32,7 @@ defmodule SlidethingWeb.RunController do
         json(conn, %{
           run_id: state.run_id,
           status: state.status,
-          phase: state.phase,
+          phase: state.running_phases |> MapSet.to_list() |> List.first(),
           prompt: state.prompt,
           book_id: state.book_id
         })

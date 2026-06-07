@@ -116,56 +116,9 @@ defmodule Slidething.Tool.Registry do
 
   # Media tools
   defp do_execute(:get_format, %{"format_id" => format_id}) do
-    result =
-      Slidething.Repo
-      |> Ecto.Adapters.SQL.query!(
-        "SELECT id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm FROM formats WHERE id = ?",
-        [format_id]
-      )
-
-    case result.rows do
-      [] ->
-        raise "Format not found: #{format_id}"
-
-      [[id, name, unit, width, height, dpi, bleed_mm, safe_margin_mm]] ->
-        %{
-          id: id,
-          name: name,
-          unit: unit,
-          width: width,
-          height: height,
-          dpi: dpi,
-          bleed_mm: bleed_mm,
-          safe_margin_mm: safe_margin_mm
-        }
-    end
-  end
-
-  defp do_execute(:generate_image, %{"prompt" => prompt} = args) do
-    aspect = args["aspect_ratio"] || "1:1"
-    spec = Slidething.Agent.Config.agent_spec(:media)
-    provider = (spec && spec.image_provider) || "mock"
-    model = (spec && spec.image_model) || "mock-image-model"
-
-    Logger.info(
-      "[Tool.Registry] generate_image provider=#{provider} model=#{model} aspect=#{aspect}: #{String.slice(prompt, 0, 80)}"
-    )
-
-    case Slidething.Image.Client.generate(provider, model, prompt, aspect) do
-      {:ok, asset_path} ->
-        %{asset_path: asset_path, prompt: prompt, aspect_ratio: aspect}
-
-      {:error, reason} ->
-        raise "Image generation failed: #{inspect(reason)}"
-    end
-  end
-
-  defp do_execute(:store_asset, %{"element_id" => element_id, "asset_path" => asset_path} = args) do
-    prompt = args["prompt"]
-
-    case Slidething.Element.update(element_id, nil, asset_path: asset_path, prompt: prompt) do
-      {:ok, data} -> data
-      {:error, reason} -> raise "Asset store failed: #{reason}"
+    case Slidething.Book.get_format(format_id) do
+      nil -> raise "Format not found: #{format_id}"
+      format -> format
     end
   end
 

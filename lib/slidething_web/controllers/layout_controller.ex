@@ -4,7 +4,7 @@ defmodule SlidethingWeb.LayoutController do
   alias Slidething.Layout
 
   def show(conn, %{"page_id" => page_id, "format_id" => format_id}) do
-    case Layout.get(page_id, format_id) do
+    case Layout.get_latest(page_id, format_id) do
       {:ok, layout} ->
         json(conn, layout)
 

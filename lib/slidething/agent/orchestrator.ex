@@ -157,7 +157,7 @@ defmodule Slidething.Agent.Orchestrator do
       {_task, pending} ->
         Process.demonitor(ref, [:flush])
         Logger.error("[Orchestrator] LLM task failed: #{inspect(reason)}")
-        {:noreply, fail_run(%{state | pending_llm_tasks: pending}, reason)}
+        fail_run(%{state | pending_llm_tasks: pending}, reason)
     end
   end
 
@@ -417,7 +417,11 @@ defmodule Slidething.Agent.Orchestrator do
     end
   end
 
-  defp all_sync?(phases), do: Enum.all?(phases, &(&1.step_type == :validator))
+  defp all_sync?(phases) do
+    Enum.all?(phases, fn p ->
+      p.step_type == :validator or (p.step_type == :agent and p.agent_type == :media)
+    end)
+  end
 
   defp execute_phase(state, %Phase{step_type: :planner} = phase) do
     Logger.info("[Orchestrator] Starting planner step '#{phase.name}'")
@@ -497,6 +501,56 @@ defmodule Slidething.Agent.Orchestrator do
       state
       | validation_issues: Map.put(state.validation_issues, phase.name, issue_maps),
         completed_phases: MapSet.put(state.completed_phases, phase.name),
+        running_phases: MapSet.delete(state.running_phases, phase.name)
+    }
+
+    broadcast_event(new_state, :phase_completed, %{phase: phase.name})
+    new_state
+  end
+
+  defp execute_phase(state, %Phase{step_type: :agent, agent_type: :media} = phase) do
+    Logger.info("[Orchestrator] Running media phase '#{phase.name}' (code)")
+    broadcast_event(state, :phase_started, %{phase: phase.name, step_type: :media})
+
+    spec = Slidething.Agent.Config.agent_spec(:media)
+    provider = (spec && spec.image_provider) || "mock"
+    model = (spec && spec.image_model) || "mock-image-model"
+
+    Enum.each(scoped_page_ids(phase.scope, state), fn page_id ->
+      elements = Slidething.Element.list(page_id)
+      prompt = build_image_prompt(elements)
+
+      case Slidething.Image.Client.generate(provider, model, prompt, "1:1") do
+        {:ok, asset_path} ->
+          existing_image = Enum.find(elements, &(&1.element_type == "image"))
+
+          cond do
+            planner_mode(state) == :edit_element ->
+              Slidething.Element.update(state.target_id, nil,
+                asset_path: asset_path,
+                prompt: prompt
+              )
+
+            existing_image != nil ->
+              Slidething.Element.update(existing_image.id, nil,
+                asset_path: asset_path,
+                prompt: prompt
+              )
+
+            true ->
+              Slidething.Element.create(page_id, "image", prompt, asset_path: asset_path)
+          end
+
+        {:error, reason} ->
+          Logger.error(
+            "[Orchestrator] Image generation failed for page #{page_id}: #{inspect(reason)}"
+          )
+      end
+    end)
+
+    new_state = %{
+      state
+      | completed_phases: MapSet.put(state.completed_phases, phase.name),
         running_phases: MapSet.delete(state.running_phases, phase.name)
     }
 
@@ -584,38 +638,6 @@ defmodule Slidething.Agent.Orchestrator do
     end)
   end
 
-  defp build_tasks_for_phase(%Phase{scope: :per_element} = phase, state) do
-    page_ids = scoped_page_ids(:per_page, state)
-
-    Enum.flat_map(page_ids, fn page_id ->
-      layout = fetch_layout(page_id)
-      elements_by_id = page_id |> Slidething.Element.list() |> Map.new(&{&1.id, &1})
-
-      page_id
-      |> media_elements_for_page(layout, elements_by_id)
-      |> Enum.map(fn {element, aspect} ->
-        scope = {:element, element.id}
-
-        content =
-          get_in(element, [:latest_version, :content]) ||
-            get_in(element, [Access.key(:latest_version, %{}), :content]) || ""
-
-        instruction =
-          "Generate an image for element #{element.id} (aspect ratio #{aspect}). " <>
-            "Description: #{content}. " <>
-            "Call generate_image with prompt and aspect_ratio=\"#{aspect}\", " <>
-            "then store_asset with the returned asset_path."
-
-        %SubagentTask{
-          agent: phase.agent_type,
-          scope: scope,
-          phase_name: phase.name,
-          instruction: instruction
-        }
-      end)
-    end)
-  end
-
   defp build_agent_instruction(phase, {:page, page_id} = scope, state) do
     base =
       InstructionBuilder.build(phase, scope, state.prompt, state.phase_context, state.book_id)
@@ -688,30 +710,38 @@ defmodule Slidething.Agent.Orchestrator do
   # ── Book + page creation ───────────────────────────────────────────────────
 
   defp setup_pages_for_plan(plan, state) do
-    if state.book_id do
-      if state.target_type == "page" && state.target_id do
-        # Targeting a specific page — use only that page
-        {:ok, state.book_id, [state.target_id]}
-      else
-        # Adding pages to an existing book — always create new ones
-        has_per_page = Enum.any?(plan.phases, &(&1.scope == :per_page))
-        page_count = if has_per_page, do: 1, else: 0
+    resolve_page_ids(planner_mode(state), plan, state)
+  end
 
-        case Slidething.Book.create_pages(state.book_id, page_count) do
-          {:ok, page_ids} -> {:ok, state.book_id, page_ids}
-          err -> err
-        end
-      end
-    else
-      # New book: create with defaults, then create pages based on plan
-      has_per_page = Enum.any?(plan.phases, &(&1.scope == :per_page))
-      page_count = if has_per_page, do: 3, else: 1
+  defp resolve_page_ids(:create_book, plan, _state) do
+    has_per_page = Enum.any?(plan.phases, &(&1.scope == :per_page))
+    page_count = if has_per_page, do: 3, else: 1
 
-      with {:ok, %{book_id: new_book_id}} <- Slidething.Book.create("Untitled", %{}),
-           _ <- Slidething.Book.add_format(new_book_id, @default_format_id),
-           {:ok, page_ids} <- Slidething.Book.create_pages(new_book_id, page_count) do
-        {:ok, new_book_id, page_ids}
-      end
+    with {:ok, %{book_id: book_id}} <- Slidething.Book.create("Untitled", %{}),
+         _ <- Slidething.Book.add_format(book_id, @default_format_id),
+         {:ok, page_ids} <- Slidething.Book.create_pages(book_id, page_count) do
+      {:ok, book_id, page_ids}
+    end
+  end
+
+  defp resolve_page_ids(:edit_book, plan, state) do
+    has_per_page = Enum.any?(plan.phases, &(&1.scope == :per_page))
+    page_count = if has_per_page, do: 1, else: 0
+
+    case Slidething.Book.create_pages(state.book_id, page_count) do
+      {:ok, page_ids} -> {:ok, state.book_id, page_ids}
+      err -> err
+    end
+  end
+
+  defp resolve_page_ids(:edit_page, _plan, state) do
+    {:ok, state.book_id, [state.target_id]}
+  end
+
+  defp resolve_page_ids(:edit_element, _plan, state) do
+    case Slidething.Element.get(state.target_id) do
+      {:ok, element} -> {:ok, state.book_id, [element.page_id]}
+      {:error, reason} -> {:error, "Could not resolve element page: #{inspect(reason)}"}
     end
   end
 
@@ -719,7 +749,6 @@ defmodule Slidething.Agent.Orchestrator do
 
   defp scoped_page_ids(:per_page, state), do: state.page_ids
   defp scoped_page_ids(:book, _state), do: []
-  defp scoped_page_ids(:per_element, state), do: state.page_ids
 
   defp no_pending_agents_for_phase?(state, phase_name) do
     not Enum.any?(state.pending_agents, fn {_pid, {pname, _}} -> pname == phase_name end)
@@ -727,49 +756,6 @@ defmodule Slidething.Agent.Orchestrator do
 
   defp find_phase(state, phase_name) do
     state.generated_plan && Enum.find(state.generated_plan.phases, &(&1.name == phase_name))
-  end
-
-  defp media_elements_for_page(_page_id, nil, elements_by_id) do
-    elements_by_id
-    |> Map.values()
-    |> Enum.filter(&image_needs_asset?/1)
-    |> Enum.map(&{&1, "1:1"})
-  end
-
-  defp media_elements_for_page(_page_id, layout, elements_by_id) do
-    Enum.flat_map(layout.element_layouts, fn entry ->
-      element_id = entry["element_id"] || entry[:element_id]
-      element = Map.get(elements_by_id, element_id)
-
-      cond do
-        is_nil(element) -> []
-        not image_needs_asset?(element) -> []
-        true -> [{element, aspect_from_layout(entry)}]
-      end
-    end)
-  end
-
-  defp image_needs_asset?(element) do
-    element.element_type == "image" and
-      (is_nil(element.latest_version) or is_nil(element.latest_version.asset_path))
-  end
-
-  defp aspect_from_layout(entry) do
-    width = entry["width"] || entry[:width]
-    height = entry["height"] || entry[:height]
-
-    if is_number(width) and is_number(height) and height > 0 do
-      Slidething.Image.Provider.snap_aspect(width / height)
-    else
-      "1:1"
-    end
-  end
-
-  defp fetch_layout(page_id) do
-    case Slidething.Layout.get_latest(page_id, @default_format_id) do
-      {:ok, layout} -> layout
-      _ -> nil
-    end
   end
 
   defp start_agent(run_id, phase_name, agent_type, scope, spec) do
@@ -783,6 +769,32 @@ defmodule Slidething.Agent.Orchestrator do
     ]
 
     DynamicSupervisor.start_child(Slidething.RunSupervisor, {AgentGenServer, opts})
+  end
+
+  defp build_image_prompt(elements) do
+    title = find_text_content(elements, "title")
+    body = find_text_content(elements, "text")
+
+    cond do
+      title && body -> "#{title} — #{body}"
+      title -> title
+      body -> body
+      true -> "Illustration"
+    end
+  end
+
+  defp find_text_content(elements, type) do
+    case Enum.find(elements, &(&1.element_type == type)) do
+      nil ->
+        nil
+
+      el ->
+        content =
+          get_in(el, [:latest_version, :content]) ||
+            get_in(el, ["latest_version", "content"])
+
+        if content && content != "", do: String.slice(to_string(content), 0, 200), else: nil
+    end
   end
 
   defp issue_to_map(issue) do
@@ -810,6 +822,7 @@ defmodule Slidething.Agent.Orchestrator do
   end
 
   defp run_planner_phases(state) do
+    mode = planner_mode(state)
     static_context = build_static_context(state)
 
     # Phase A: Decide — check if context gathering is needed
@@ -825,7 +838,7 @@ defmodule Slidething.Agent.Orchestrator do
     # Phase B: Gather — collect detailed context if needed
     gathered_context =
       if needs_context do
-        run_gather_phase(state, static_context)
+        run_gather_phase(mode, static_context)
       else
         ""
       end
@@ -834,7 +847,7 @@ defmodule Slidething.Agent.Orchestrator do
 
     # Phase C: Emit — generate the plan using submit_plan
     emit_prompt = build_emit_prompt(static_context, gathered_context)
-    run_emit_phase(emit_prompt)
+    run_emit_phase(mode, emit_prompt)
   end
 
   defp build_static_context(state) do
@@ -879,7 +892,13 @@ defmodule Slidething.Agent.Orchestrator do
           parts ++ ["Target page: #{page_id}\nExisting elements:\n#{elements_text}"]
 
         "element" when not is_nil(state.target_id) ->
-          parts ++ ["Target element: #{state.target_id}"]
+          element_info =
+            case Slidething.Element.get(state.target_id) do
+              {:ok, el} -> "Target element: #{state.target_id} (type: #{el.element_type})"
+              _ -> "Target element: #{state.target_id}"
+            end
+
+          parts ++ [element_info]
 
         _ ->
           parts
@@ -906,8 +925,9 @@ defmodule Slidething.Agent.Orchestrator do
     end
   end
 
-  defp run_gather_phase(_state, static_context) do
-    spec = Slidething.Agent.Config.agent_spec(:planner_gather)
+  defp run_gather_phase(mode, static_context) do
+    base_spec = Slidething.Agent.Config.agent_spec(:planner_gather)
+    spec = %{base_spec | tools: gather_tools_for_mode(mode)}
 
     messages = [
       %Message{role: :system, content: spec.system_prompt},
@@ -952,11 +972,30 @@ defmodule Slidething.Agent.Orchestrator do
     Enum.join(parts, "\n\n")
   end
 
-  defp run_emit_phase(emit_prompt) do
+  defp planner_mode(%{book_id: nil}), do: :create_book
+  defp planner_mode(%{target_type: "page", target_id: t}) when not is_nil(t), do: :edit_page
+  defp planner_mode(%{target_type: "element", target_id: t}) when not is_nil(t), do: :edit_element
+  defp planner_mode(_), do: :edit_book
+
+  defp gather_tools_for_mode(:edit_element), do: [:get_element, :get_recent_prompts]
+  defp gather_tools_for_mode(_), do: [:get_outline, :get_page_elements, :get_recent_prompts]
+
+  defp emit_scope_constraint(:edit_page) do
+    "\n\nSCOPE CONSTRAINT: This run targets a specific page. Only generate phases with scope \"per_page\". Do not generate \"book\" or \"per_element\" scoped phases."
+  end
+
+  defp emit_scope_constraint(:edit_element) do
+    "\n\nSCOPE CONSTRAINT: This run targets a specific element. Only generate phases with scope \"per_page\" — the element's page is already in scope and the target element_id is in the agent instruction. Do not generate \"book\" or \"per_element\" scoped phases."
+  end
+
+  defp emit_scope_constraint(_), do: ""
+
+  defp run_emit_phase(mode, emit_prompt) do
     spec = Slidething.Agent.Config.agent_spec(:planner_emit)
+    system_prompt = spec.system_prompt <> emit_scope_constraint(mode)
 
     case Slidething.LLM.Client.complete_json(spec, [
-           %Message{role: :system, content: spec.system_prompt},
+           %Message{role: :system, content: system_prompt},
            %Message{role: :user, content: emit_prompt}
          ]) do
       {:tool_requests, calls} ->

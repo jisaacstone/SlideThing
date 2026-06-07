@@ -4,6 +4,10 @@ if System.get_env("PHX_SERVER") do
   config :slidething, SlidethingWeb.Endpoint, server: true
 end
 
+if config_path = System.get_env("SLIDETHING_AGENT_CONFIG") do
+  config :slidething, agent_config_path: config_path
+end
+
 if config_env() == :prod do
   database_path =
     System.get_env("DATABASE_PATH") ||

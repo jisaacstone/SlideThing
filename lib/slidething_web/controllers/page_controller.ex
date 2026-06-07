@@ -1,5 +1,5 @@
 defmodule SlidethingWeb.PageController do
-  use Phoenix.Controller
+  use SlidethingWeb, :controller
 
   alias Slidething.Book
   alias Slidething.Element

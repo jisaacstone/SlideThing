@@ -62,8 +62,7 @@ defmodule Mix.Tasks.Slidething.Generate do
 
     {:ok, run_id} = API.start_run(prompt)
 
-    API.subscribe_to_run(run_id)
-    API.subscribe_to_agent_events(run_id)
+    API.subscribe(run_id)
 
     wait_for_completion()
   end

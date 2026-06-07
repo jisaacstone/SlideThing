@@ -159,7 +159,7 @@ defmodule Slidething.Element do
   end
 
   @doc """
-  Delete an element (marks inactive by clearing page_id).
+  Delete an element and all its versions.
   """
   def delete(element_id) do
     query("DELETE FROM element_versions WHERE element_id = ?", [element_id])

@@ -28,13 +28,6 @@ defmodule Slidething.Layout do
   end
 
   @doc """
-  Get the latest layout for a (page_id, format_id) pair, or {:error, :not_found}.
-  """
-  def get(page_id, format_id) do
-    get_latest(page_id, format_id)
-  end
-
-  @doc """
   Get all layout versions for a page, newest first.
   """
   def get_all(page_id) do
@@ -61,7 +54,7 @@ defmodule Slidething.Layout do
   end
 
   @doc """
-  Get all layout versions for a page with format dimensions joined, newest first.
+  Get all layout versions for a page, newest first.
   """
   def get_all_with_format(page_id) do
     result =
