@@ -9,22 +9,18 @@ Table of Content
 
 ## Agentic API
 
-These calls are routed thought an agentic system
+These calls are routed through the agentic system (`Slidething.Agent.API`).
 
-### Create
+### start_run
 
-The main interface. Inputs:
+The main interface. The Planner decides which phases to run based on the prompt and target.
 
-* Prompt. Required. The new prompt describing the desired user action
-* Id. Optional. Constrain action to only deal with an explicit existing item in the internal representation.
-Can be book-id, page-id, element-id
+* Prompt. Required. Describes the desired action (create book, edit page, restyle image, etc.)
+* BookId. Optional. If omitted, a new book is created.
+* TargetType. Optional. `"page"` or `"element"` — scopes the run to a specific item.
+* TargetId. Optional. The page_id or element_id to target.
 
-### Refine
-
-Specifically for formatting and validation. This will only update layout, not content.
-
-* Prompt. Required. New layout-specific prompt
-* Id. Optional. Book, page or element id. Multiple ids can be provided
+Returns `{:ok, run_id}`. Progress is streamed as events on the `"events:#{run_id}"` PubSub topic.
 
 ## Element API
 
@@ -90,39 +86,47 @@ A version of a Page is the elements and the layout.
 
 Separating layout from elements allows us to target multiple layout formats.
 
-We will have two tables for elements
+All element types share a single `elements` table. Content and asset data live in `element_versions` (append-only).
 
-Media:
+Elements:
 Id: UUID
-Version: Int
-Metadata:
-  Prompt: String
-  Content-Type: String
+PageId: UUID
+ElementType: title | text | caption | image
+Position: Int
+Locked: Bool
 
-Text:
+ElementVersions:
 Id: UUID
+ElementId: UUID
 Version: Int
-Content: String
-Metadata:
-  Prompt: String
-  Etc
+RunId: UUID (the prompt that produced this version)
+Content: String (text/title/caption)
+AssetPath: String (image, filesystem path)
+Prompt: String
+Metadata: JSON
 
-Layout happens at the page level. We reference the Format table
+Layout happens at the page level. We reference the Format table.
 
 Format:
 Id: UUID
+Name: String
 Unit: cm | pt
 Width: Float
 Height: Float
+DPI: Int
+BleedMm: Float
+SafeMarginMm: Float
+
+Seeded formats: `format-web` (72 dpi, no bleed) and `format-print` (300 dpi, 3 mm bleed).
 
 Layout:
 FormatId: UUID
 PageId: UUID
 Version: Int
-ElementLayouts:
+RunId: UUID
+ElementLayouts: JSON array of
   ElementId: UUID
-  BoundingBox: (Point, Point)
-  Etc
+  X, Y, Width, Height: Float (fractions of page in 0..1)
 
 Book:
 Metadata:
@@ -138,40 +142,50 @@ Metadata:
 
 # Agent Structure
 
-We have a tree of agents.
+The Orchestrator is pure code — no LLM. It drives a plan produced by the Planner pipeline, then executes phases in dependency order.
 
-At the top level is the Orchestrator. It takes user input, calls subagents, and returns a response.
+```
+Orchestrator (pure code, GenServer)
+  │
+  ├── Planner pipeline (Task, 4 phases in sequence):
+  │     decide → gather (tools) → condense → emit (submit_plan)
+  │
+  ├── Content phases (inline Task per element — returns raw text)
+  │
+  ├── Media phases (inline Task per image — calls Image.Client)
+  │
+  ├── Layout agents (AgentGenServer per page, parallel)
+  │
+  ├── Coordinator phase (inline Task — reviews coherence, may patch plan)
+  │
+  └── Validator phase (synchronous inline — deterministic layout checks)
+```
 
-Below the Orchestrator are the Research, Content, Layout subagents.
+**Planner** is a 4-step pipeline, not a single call. The gather step uses tools to read current book state before planning.
 
-           +------------------+
-           |   Orchestrator   |
-           +------------------+
-             |       |       |
-    +----------+-----------+----------+
-    | Research |  Content  |  Layout  |
-    +----------+-----------+----------+
+Planner gather tools: `get_outline`, `get_page_elements`, `get_element`, `get_recent_prompts`
+Planner emit tool: `submit_plan`
 
-The Research agent is our global planner. It makes project-wide decisions, searches the web, and is responsible for major theme and formatting decisions.
+**Content** writes text for a single element and returns it as plain text. No tools. The Orchestrator creates or updates the element directly.
 
-Required tools: Web Search, Book table CRUD operations, get-outline, get-content, preview
-Required model capabilities: Reasoning
+**Media** generates an image for a page. The Orchestrator calls `Image.Client.generate/4` directly (no tools) and stores the result via `Element.create/update`.
 
-The Content agent is responsible for all content elements. The actual images and text. This agent also assigns these elements to specific pages.
+**Layout** (AgentGenServer) takes element data and format dimensions — injected directly into the instruction — and calls `propose_layout` to record fractional (0..1) element positions.
 
-Required tools: media-lookup, media-creation, get-page-elements, get-element, CRUD element operation
-Media queries require image capable models - these can be a separate subagent.
+Layout tools: `get_page_elements`, `get_format`, `get_element`, `propose_layout`
+(In practice, element data is injected and the agent is told not to call get_page_elements/get_format.)
 
-The Layout agent takes the content and lays it out on the page.
+**Coordinator** is an optional review step that reads the full book content and can return `plan_patches` to adjust not-yet-started phases. Capped at 3 rounds.
 
-Content and Layout agents work at the page level. So they can be run in parallel if multiple page edits are required by the orchestrator.
+**Validator** runs deterministic layout checks inline (no LLM). Issues are stored in orchestrator state. Conditional repair phases check this state before deciding to run.
 
-Content and Layout agents have a built in validation loop.
-Content agent validates against the global requirements recorded by the Research agent.
-Does this make sense, is it truthful, does it fit with the theme, is it in the correct order, etc
-Layout validates with deterministic layout rules. Is the centering correct, does the text overflow, is it too small or too big, are the images of the correct resolution, etc.
+**Research** handles book-level metadata decisions (theme, audience, style). Runs as a GenServer agent.
 
-After every prompt, the orchestrator agent creates a new version of all layouts and content.
+Research tools: `get_book`, `get_outline`, `update_book_metadata`, `update_page_metadata`
+
+Layout and research phases parallelize automatically — one agent per page (or per scope) is spawned when the phase is ready. Content and media phases run as Tasks and also parallelize based on dependency ordering in the plan.
+
+After every prompt, the orchestrator appends new element versions and layout versions for all affected pages.
 
 # UI
 

@@ -141,13 +141,17 @@ SQLite via Ecto. Tables created at startup (`lib/slidething/schema/bootstrap.ex`
 ## Architecture
 
 ```
-UI/API prompt → Orchestrator → Planner → Content/Layout Agents
-                                      → Validation
-                                      → Commit versions
-                                      → Websocket diff to UI
+UI/API prompt → Orchestrator → Planner pipeline (decide → gather → condense → emit)
+                             → Content phases  (inline Tasks, one per element)
+                             → Media phases    (inline Tasks, Image.Client)
+                             → Layout phases   (AgentGenServer per page)
+                             → Coordinator     (inline Task, may patch plan)
+                             → Validator       (synchronous inline, per page)
+                             → Repair layout   (if validation issues)
+                             → Websocket events to UI
 ```
 
-See `PLAN.md` for full design decisions.
+See `DESIGN.md` for full architecture decisions.
 
 ## Export
 

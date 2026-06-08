@@ -37,6 +37,7 @@ WebSocket: `ws://localhost:4000/socket`
 | GET | `/api/pages/:page_id/elements` | List elements on a page |
 | GET | `/api/elements/:element_id` | Get a specific element |
 | PATCH | `/api/elements/:element_id` | Update element content/asset. Body: `{"content": "...", "asset_path": "..."}` |
+| DELETE | `/api/elements/:element_id` | Delete an element |
 
 ### Layouts
 
@@ -44,7 +45,7 @@ WebSocket: `ws://localhost:4000/socket`
 |--------|------|-------------|
 | GET | `/api/pages/:page_id/layouts` | List layouts for a page |
 | GET | `/api/pages/:page_id/layouts/:format_id` | Get a specific layout |
-| PATCH | `/api/pages/:page_id/layouts` | Update element position in layout. Body: `{"format_id": "...", "element_id": "...", "x": 10, "y": 20}` |
+| PATCH | `/api/pages/:page_id/layouts` | Move element in layout. Body: `{"format_id": "...", "element_id": "...", "x": 0.1, "y": 0.2}` — x/y are fractions of page (0..1) |
 
 ### Formats
 
@@ -58,7 +59,7 @@ WebSocket: `ws://localhost:4000/socket`
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/runs` | Submit a prompt to the agent. Body: `{"prompt": "...", "book_id": "...", "target_type": "page\|element", "target_id": "..."}` (target_type/target_id optional) |
-| GET | `/api/runs/:run_id` | Check run status. Returns: `{run_id, status, phase, prompt, book_id}` |
+| GET | `/api/runs/:run_id` | Check run status. Returns: `{run_id, status, phase, prompt, book_id}` — `phase` is the currently running phase name (or null) |
 
 ### Assets
 
@@ -90,39 +91,33 @@ ch.push("prompt", {prompt: "Create a 5-page book about a penguin", book_id: "boo
 ```
 
 Outbound events (received):
-- `run_event` — `{event, status, phase, data, run_id, timestamp}` — orchestrator-level progress
-- `agent_event` — per-agent streaming progress (tool calls, LLM iterations)
+- `run_event` — `{run_id, event, status, data, timestamp}` — orchestrator-level progress (`event` is e.g. `:started`, `:phase_started`, `:phase_completed`, `:completed`, `:failed`; phase name is inside `data`)
+- `agent_event` — `{run_id, agent_type, scope, event, data, timestamp}` — per-agent progress (tool calls, LLM iterations)
 
 Inbound messages (sent):
 - `"prompt"` — `{prompt, book_id}` — Start an agent run directly from the socket
 
 ### Book channel — `"book:{book_id}"`
 
-Join to receive page and book change notifications, or query book state:
+Request/reply channel for querying book state. No server-push events — all messages are synchronous replies.
 
 ```javascript
 const ch = socket.channel("book:book_xyz", {})
-ch.on("page_event", (event) => console.log(event))
-ch.on("book_event", (event) => console.log(event))
 ch.join()
 
 // Query book state
-ch.push("get_book", {})
-ch.push("get_page", {page_id: "page_123"})
-ch.push("get_element", {element_id: "elem_456"})
-ch.push("get_layout", {page_id: "page_123", format_id: "fmt_789"})
+ch.push("get_book", {}).receive("ok", (book) => console.log(book))
+ch.push("get_page", {page_id: "page_123"}).receive("ok", (page) => console.log(page))
+ch.push("get_element", {element_id: "elem_456"}).receive("ok", (el) => console.log(el))
+ch.push("get_layout", {page_id: "page_123", format_id: "format-web"}).receive("ok", (l) => console.log(l))
 ```
 
-Outbound events (received):
-- `page_event` — page change notifications
-- `book_event` — book change notifications
-
-Inbound messages (sent):
-- `"get_book"` — Fetch the book and all pages
-- `"get_page"` — `{page_id}` — Fetch a specific page
-- `"get_pages"` — Fetch all pages in the book
-- `"get_element"` — `{element_id}` — Fetch a specific element
-- `"get_layout"` — `{page_id, format_id}` — Fetch layout for a page/format
+Inbound messages (sent), all return a reply:
+- `"get_book"` — Returns the book with its pages
+- `"get_page"` — `{page_id}` — Returns page with elements and layouts
+- `"get_pages"` — Returns all pages with elements and layouts
+- `"get_element"` — `{element_id}` — Returns a specific element
+- `"get_layout"` — `{page_id, format_id}` — Returns the latest layout for a page/format
 
 ## Run Status and Phases
 
@@ -195,7 +190,7 @@ curl -X PATCH http://localhost:4000/api/elements/elem_abc123 \
 ```bash
 curl -X PATCH http://localhost:4000/api/pages/page_abc123/layouts \
   -H "Content-Type: application/json" \
-  -d '{"format_id": "fmt_6x9", "element_id": "elem_abc123", "x": 50, "y": 100}'
+  -d '{"format_id": "format-web", "element_id": "elem_abc123", "x": 0.1, "y": 0.2}'
 ```
 
 ### Inspecting a book
@@ -244,14 +239,14 @@ Elements store versioned content in **ElementVersion**:
 - `metadata` (map) — generation metadata
 
 ### Layout
-Pages have layout versions per format that define bounding boxes in **LayoutVersion**:
+Pages have layout versions per format in **LayoutVersion**:
 - `id, page_id, format_id, version, run_id` — identifies the layout
-- `element_layouts` (array of maps) — `[{element_id, x, y, width, height}, ...]` bounding boxes
+- `element_layouts` (array of maps) — `[{element_id, x, y, width, height}, ...]` where all coordinates are fractions of page dimensions in 0..1
 
 ### Format
-- `id, name` (string) — e.g. "paperback 6x9"
-- `unit` (string) — "mm" or "in"
-- `width, height` (number) — page dimensions
+- `id, name` (string) — seeded formats: `"format-web"` (72 dpi) and `"format-print"` (300 dpi, 3 mm bleed)
+- `unit` (string) — "cm" or "pt"
+- `width, height` (number) — page dimensions in the given unit
 - `dpi` (integer) — dots per inch for raster output
 - `bleed_mm, safe_margin_mm` (number) — print safety margins
 

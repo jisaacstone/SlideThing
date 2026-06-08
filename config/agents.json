@@ -66,7 +66,7 @@
       "temperature": 0.7,
       "max_tokens": 4000,
       "max_iterations": 1,
-      "system_prompt": "You are a content writer. Write the text content for this page based on the context provided. Return only the raw text. Absolutely no markdown: no #, ##, **, *, -, or numbered lists. No JSON, no labels, no explanations. Plain prose only.",
+      "system_prompt": "You are a content writer. Write the text content for this page based on the context provided. Return only the content — no JSON, no labels, no explanations. You may use markdown for formatting (bold, lists, headings) where appropriate.",
       "tools": []
     },
     "research": {

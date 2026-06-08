@@ -49,8 +49,8 @@
               />
             </template>
             <template v-else>
-              <h2 v-if="el.element_type === 'title'">{{ el.content || "" }}</h2>
-              <span v-else>{{ el.content || "" }}</span>
+              <MarkdownContent v-if="el.content" :content="el.content" />
+              <span v-else></span>
             </template>
           </div>
         </div>
@@ -62,6 +62,7 @@
 <script setup lang="ts">
 import { computed, ref, nextTick } from "vue";
 import type { Page, ElementItem } from "../api";
+import MarkdownContent from "./MarkdownContent.vue";
 
 const props = defineProps<{
   page: Page | null;
