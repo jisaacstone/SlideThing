@@ -119,8 +119,8 @@ watch(
 watch(
   () => props.selectedElement,
   (el) => {
-    if (el && el.latest_version?.content) {
-      elementContent.value = el.latest_version.content;
+    if (el && el.content) {
+      elementContent.value = el.content;
     } else {
       elementContent.value = "";
     }
@@ -143,7 +143,7 @@ function deleteElement() {
 }
 
 function saveElementContent() {
-  if (props.selectedElement && elementContent.value !== (props.selectedElement.latest_version?.content || "")) {
+  if (props.selectedElement && elementContent.value !== (props.selectedElement.content || "")) {
     emit("updateContent", props.selectedElement.id, elementContent.value);
   }
 }

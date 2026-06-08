@@ -6,42 +6,6 @@ defmodule Slidething.Tool.Schemas do
   """
 
   @schemas %{
-    create_book: %{
-      name: "create_book",
-      description:
-        "Create a new book with title and metadata. Use this FIRST when generating a new book.",
-      parameters: %{
-        type: "object",
-        properties: %{
-          title: %{type: "string", description: "The book title"},
-          metadata: %{type: "object", description: "Book metadata: theme, target_audience, style"}
-        },
-        required: ["title"]
-      }
-    },
-    create_pages: %{
-      name: "create_pages",
-      description:
-        "Create pages for a book. Pass either a count (integer) or a list of page descriptions.",
-      parameters: %{
-        type: "object",
-        properties: %{
-          book_id: %{type: "string", description: "The book ID to add pages to"},
-          pages: %{
-            type: "array",
-            description: "List of page descriptors, each with position and metadata.description",
-            items: %{
-              type: "object",
-              properties: %{
-                position: %{type: "integer"},
-                metadata: %{type: "object", properties: %{description: %{type: "string"}}}
-              }
-            }
-          }
-        },
-        required: ["book_id", "pages"]
-      }
-    },
     get_book: %{
       name: "get_book",
       description: "Get the full book with all pages and elements",
@@ -77,46 +41,13 @@ defmodule Slidething.Tool.Schemas do
     },
     get_element: %{
       name: "get_element",
-      description: "Get a single element with its version history",
+      description: "Get a single element with its content",
       parameters: %{
         type: "object",
         properties: %{
           element_id: %{type: "string", description: "The element ID"}
         },
         required: ["element_id"]
-      }
-    },
-    create_element: %{
-      name: "create_element",
-      description:
-        "Create a new element on a page. Element types: 'title', 'text', 'image', 'caption'.",
-      parameters: %{
-        type: "object",
-        properties: %{
-          page_id: %{type: "string", description: "The page ID to add the element to"},
-          element_type: %{
-            type: "string",
-            description: "Element type: title, text, image, caption"
-          },
-          content: %{
-            type: "string",
-            description:
-              "The text content (for text/title/caption). For images, use an image prompt description."
-          }
-        },
-        required: ["page_id", "element_type", "content"]
-      }
-    },
-    update_element: %{
-      name: "update_element",
-      description: "Update an element's content (creates a new version)",
-      parameters: %{
-        type: "object",
-        properties: %{
-          element_id: %{type: "string", description: "The element ID to update"},
-          content: %{type: "string", description: "The new content"}
-        },
-        required: ["element_id", "content"]
       }
     },
     update_book_metadata: %{
@@ -196,19 +127,6 @@ defmodule Slidething.Tool.Schemas do
         required: ["page_id", "format_id", "element_layouts"]
       }
     },
-    validate_page: %{
-      name: "validate_page",
-      description:
-        "Validate the layout of a page. Returns issue_count and a list of issues with severity, rule, and message.",
-      parameters: %{
-        type: "object",
-        properties: %{
-          page_id: %{type: "string", description: "The page ID to validate"},
-          format_id: %{type: "string", description: "The format ID, e.g. 'format-web'"}
-        },
-        required: ["page_id"]
-      }
-    },
     submit_plan: %{
       name: "submit_plan",
       description: "Submit the execution plan. Call this once with your complete plan.",
@@ -239,7 +157,44 @@ defmodule Slidething.Tool.Schemas do
                       type: "string",
                       description: "content | layout | media | validator | coordinator | planner"
                     },
-                    scope: %{type: "string", description: "book | per_page"},
+                    scope: %{
+                      type: "string",
+                      description:
+                        "book | per_page (content/media always use \"book\"; layout uses \"per_page\")"
+                    },
+                    config: %{
+                      type: "object",
+                      description:
+                        "Phase-specific targeting and parameters. content/media phases MUST include this.",
+                      properties: %{
+                        op: %{type: "string", description: "\"create\" or \"update\""},
+                        element_type: %{
+                          type: "string",
+                          description:
+                            "For content create: \"title\", \"text\", \"caption\", etc."
+                        },
+                        element_id: %{
+                          type: "string",
+                          description: "For updates: the element ID to overwrite"
+                        },
+                        page_index: %{
+                          type: "integer",
+                          description:
+                            "0-based index for new pages. First phase using an index creates the page; later phases reuse it."
+                        },
+                        page_id: %{type: "string", description: "Existing page ID for edit runs"},
+                        aspect_ratio: %{
+                          type: "string",
+                          description:
+                            "For media: image aspect ratio, e.g. \"1:1\", \"4:3\", \"16:9\". Defaults to \"1:1\"."
+                        },
+                        image_prompt: %{
+                          type: "string",
+                          description:
+                            "For media: static style/art-direction prompt. Combined at runtime with subject derived from page text elements."
+                        }
+                      }
+                    },
                     depends_on: %{
                       type: "array",
                       items: %{type: "string"},

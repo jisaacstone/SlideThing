@@ -12,7 +12,8 @@ defmodule Slidething.Validator.Layout do
         check_zero_area(layouts) ++
           check_overflow(layouts) ++
           check_intersections(layouts) ++
-          check_safe_margin(layouts, format)
+          check_safe_margin(layouts, format) ++
+          check_text_height(layouts, page_id)
     end
   end
 
@@ -95,6 +96,29 @@ defmodule Slidething.Validator.Layout do
         message: "Element encroaches on safe margin zone",
         measured_value: %{x: el["x"], y: el["y"], width: el["width"], height: el["height"]},
         expected_value: %{margin_x: mx, margin_y: my}
+      }
+    end
+  end
+
+  defp check_text_height(layouts, page_id) do
+    elements = Slidething.Element.list(page_id)
+
+    for layout <- layouts,
+        el = Enum.find(elements, &(&1.id == layout["element_id"])),
+        el != nil,
+        el.element_type in ["text", "title", "caption"],
+        content = el.content || "",
+        String.length(content) > 150,
+        layout["height"] < 0.4 do
+      %ValidationIssue{
+        severity: :warning,
+        source: :layout,
+        target_id: layout["element_id"],
+        rule: "text_height",
+        message:
+          "Text (#{String.length(content)} chars) likely overflows height=#{layout["height"]}; suggest >= 0.4",
+        measured_value: %{height: layout["height"], chars: String.length(content)},
+        expected_value: "height >= 0.4 for content > 150 chars"
       }
     end
   end

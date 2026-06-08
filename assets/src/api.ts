@@ -28,14 +28,8 @@ export interface ElementItem {
   element_type: "title" | "text" | "image" | "caption";
   position: number;
   locked: boolean;
-  latest_version?: ElementVersion;
-}
-
-export interface ElementVersion {
-  version: number;
   content: string | null;
   asset_path: string | null;
-  prompt: string | null;
 }
 
 export interface Format {

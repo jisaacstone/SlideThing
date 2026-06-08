@@ -49,10 +49,10 @@ defmodule Slidething.Agent.OrchestratorLayoutMediaTest do
       images = Enum.filter(elements, &(&1.element_type == "image"))
 
       for img <- images do
-        assert is_binary(img.latest_version.asset_path),
+        assert is_binary(img.asset_path),
                "image element #{img.id} should have an asset_path"
 
-        assert File.exists?(Slidething.AssetStore.full_path(img.latest_version.asset_path)),
+        assert File.exists?(Slidething.AssetStore.full_path(img.asset_path)),
                "asset file should exist on disk"
       end
     end

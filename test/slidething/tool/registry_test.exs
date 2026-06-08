@@ -147,7 +147,6 @@ defmodule Slidething.Tool.RegistryTest do
 
       assert %ToolResult{success: true} = result
       assert result.data.content == "Updated"
-      assert result.data.version == 2
     end
 
     test "fails for nonexistent element" do

@@ -26,7 +26,8 @@ defmodule Slidething.Agent.InstructionBuilder do
         "User request: #{user_prompt}",
         scope_description(scope, book_id),
         phase_context(phase, phase_context_map),
-        phase_planner_context(phase)
+        phase_planner_context(phase),
+        content_task_directive(phase)
       ]
       |> Enum.reject(&is_nil/1)
       |> Enum.reject(&(&1 == ""))
@@ -99,29 +100,30 @@ defmodule Slidething.Agent.InstructionBuilder do
         elements ->
           lines =
             Enum.map(elements, fn el ->
-              version = el[:latest_version] || %{}
-              content = version[:content] || version["content"] || "(no content)"
+              content = el[:content] || el["content"] || "(no content)"
               "  - [#{el.element_type}] #{el.id}: #{String.slice(to_string(content), 0, 80)}"
             end)
 
           "Existing elements on page:\n" <> Enum.join(lines, "\n")
       end
 
-    scope_description(:book, book_id) <>
-      "\n" <>
-      base <>
-      if(elements_desc, do: "\n" <> elements_desc, else: "")
+    body =
+      scope_description(:book, book_id) <>
+        "\n" <>
+        base <>
+        if(elements_desc, do: "\n" <> elements_desc, else: "")
+
+    "=== Page context (reference only — do not reproduce) ===\n" <> body <> "\n==="
   end
 
   defp scope_description({:element, element_id}, book_id) do
     base = "Element ID: #{element_id}"
 
     element_desc =
-      case Slidething.Element.get(element_id, history: 1) do
+      case Slidething.Element.get(element_id) do
         {:ok, el} ->
-          version = el[:latest_version] || %{}
-          content = version[:content] || version["content"]
-          asset_path = version[:asset_path] || version["asset_path"]
+          content = el[:content] || el["content"]
+          asset_path = el[:asset_path] || el["asset_path"]
           type_line = "Type: #{el.element_type}"
 
           content_line =
@@ -173,9 +175,8 @@ defmodule Slidething.Agent.InstructionBuilder do
 
         elements_text =
           Enum.map(elements, fn el ->
-            version = el[:latest_version] || %{}
-            content = version[:content] || version["content"] || "(empty)"
-            asset = version[:asset_path] || version["asset_path"]
+            content = el[:content] || el["content"] || "(empty)"
+            asset = el[:asset_path] || el["asset_path"]
 
             line =
               "    [#{el.element_type}] #{el.id}: #{String.slice(to_string(content), 0, 200)}"
@@ -211,4 +212,17 @@ defmodule Slidething.Agent.InstructionBuilder do
     - Output JSON only. No prose, no markdown fences.
     """
   end
+
+  defp content_task_directive(%Slidething.Agent.Phase{agent_type: :content} = phase) do
+    config = phase.config || %{}
+    element_type = config["element_type"] || "text"
+    page_index = config["page_index"]
+
+    page_note =
+      if is_integer(page_index), do: " for page #{page_index + 1}", else: ""
+
+    "---\nTask: Write ONLY the #{element_type}#{page_note}. One element, one page. Output raw text only — no JSON, no markdown, no labels, no content from other pages."
+  end
+
+  defp content_task_directive(_phase), do: nil
 end

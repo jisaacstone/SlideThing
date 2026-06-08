@@ -72,7 +72,6 @@ defmodule Slidething.Agent.OrchestratorTest do
       Orchestrator.start_run(pid, "Create a book", nil)
       assert_receive {:run_event, %{event: :planning_complete, data: data}}, @run_timeout
       assert is_binary(data.book_id)
-      assert data.page_count > 0
       assert data.phase_count > 0
     end
 

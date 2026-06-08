@@ -127,6 +127,15 @@ defmodule Slidething.Book do
   end
 
   @doc """
+  Update book title.
+  """
+  def update_title(book_id, title) do
+    now = now_iso()
+    query("UPDATE books SET title = ?, updated_at = ? WHERE id = ?", [title, now, book_id])
+    :ok
+  end
+
+  @doc """
   Update book metadata.
   """
   def update_metadata(book_id, metadata) do

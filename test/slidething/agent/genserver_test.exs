@@ -11,14 +11,14 @@ defmodule Slidething.Agent.GenServerTest do
     {:ok, [page_id]} = Slidething.Book.create_pages(book_id, 1)
 
     spec = %AgentSpec{
-      name: :content,
+      name: :layout,
       provider: "mock",
       model: "mock-model",
-      temperature: 0.7,
+      temperature: 0.3,
       max_tokens: 4000,
       max_iterations: 5,
-      system_prompt: "You are a test agent.",
-      tools: [:create_element]
+      system_prompt: "You are a layout designer.",
+      tools: [:get_page_elements, :propose_layout]
     }
 
     test_pid = self()
@@ -35,7 +35,7 @@ defmodule Slidething.Agent.GenServerTest do
     {:ok, agent_pid} =
       AgentGenServer.start_link(
         run_id: run_id,
-        agent_type: :content,
+        agent_type: :layout,
         scope: {:page, page_id},
         orchestrator_pid: orchestrator_pid,
         agent_spec: spec
@@ -61,7 +61,7 @@ defmodule Slidething.Agent.GenServerTest do
       assert [{^agent_pid, _}] =
                Registry.lookup(
                  Slidething.AgentRegistry,
-                 {run_id, nil, :content, {:page, page_id}}
+                 {run_id, nil, :layout, {:page, page_id}}
                )
     end
 
@@ -211,16 +211,19 @@ defmodule Slidething.Agent.GenServerTest do
     end
 
     test "respects max_iterations limit", %{run_id: run_id} do
+      {:ok, %{book_id: book_id}} = Slidething.Book.create("Test Book")
+      {:ok, [page_id]} = Slidething.Book.create_pages(book_id, 1)
+
       spec = %AgentSpec{
-        name: :content,
+        name: :layout,
         provider: "mock",
         model: "mock-model",
-        temperature: 0.7,
+        temperature: 0.3,
         max_tokens: 4000,
-        # Very low limit
+        # Very low limit — only one LLM call allowed
         max_iterations: 1,
         system_prompt: "Test",
-        tools: []
+        tools: [:get_page_elements, :propose_layout]
       }
 
       {:ok, orchestrator} =
@@ -235,17 +238,18 @@ defmodule Slidething.Agent.GenServerTest do
       {:ok, agent_pid} =
         AgentGenServer.start_link(
           run_id: run_id,
-          agent_type: :content,
-          scope: nil,
+          agent_type: :layout,
+          scope: {:page, page_id},
           orchestrator_pid: orchestrator,
           agent_spec: spec
         )
 
       Phoenix.PubSub.subscribe(Slidething.PubSub, "events:#{run_id}")
 
-      AgentGenServer.start_task(agent_pid, "Test", %{})
+      AgentGenServer.start_task(agent_pid, "Layout for page #{page_id}", %{})
 
-      # Should fail due to max iterations
+      # Should fail due to max iterations (layout mock returns tool on iter 0,
+      # tool execution bumps iteration to 1, next LLM call hits the limit)
       assert_receive {:agent_event,
                       %{event: :failed, data: %{reason: ":max_iterations_reached"}}},
                      2000
@@ -258,14 +262,14 @@ defmodule Slidething.Agent.GenServerTest do
       {:ok, [page_id]} = Slidething.Book.create_pages(book_id, 1)
 
       spec = %AgentSpec{
-        name: :content,
+        name: :layout,
         provider: "mock",
         model: "mock-model",
-        temperature: 0.7,
+        temperature: 0.3,
         max_tokens: 4000,
         max_iterations: 1,
         system_prompt: "Test",
-        tools: [:create_element]
+        tools: [:get_page_elements, :propose_layout]
       }
 
       test_pid = self()
@@ -282,7 +286,7 @@ defmodule Slidething.Agent.GenServerTest do
       {:ok, agent_pid} =
         AgentGenServer.start_link(
           run_id: run_id,
-          agent_type: :content,
+          agent_type: :layout,
           scope: {:page, page_id},
           orchestrator_pid: orchestrator,
           agent_spec: spec
@@ -302,7 +306,7 @@ defmodule Slidething.Agent.GenServerTest do
 
       assert %AgentGenServer{} = state
       assert state.run_id
-      assert state.agent_type == :content
+      assert state.agent_type == :layout
       assert state.scope == {:page, page_id}
       assert state.agent_spec
     end

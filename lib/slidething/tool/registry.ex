@@ -74,7 +74,7 @@ defmodule Slidething.Tool.Registry do
   end
 
   defp do_execute(:get_element, %{"element_id" => element_id}) do
-    case Slidething.Element.get(element_id, history: 5) do
+    case Slidething.Element.get(element_id) do
       {:ok, data} -> data
       {:error, reason} -> raise "Element not found: #{reason}"
     end

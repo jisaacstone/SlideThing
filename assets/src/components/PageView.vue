@@ -32,8 +32,8 @@
           @lostpointercapture="cancelDrag()"
           @dblclick="startEdit($event, el)"
         >
-          <div v-if="el.element_type === 'image' && el.latest_version?.asset_path" class="el-image-wrapper">
-            <img :src="'/api/assets/' + el.latest_version.asset_path" alt="" />
+          <div v-if="el.element_type === 'image' && el.asset_path" class="el-image-wrapper">
+            <img :src="'/api/assets/' + el.asset_path" alt="" />
           </div>
           <div v-else class="el-text">
             <template v-if="editState?.elementId === el.id">
@@ -49,8 +49,8 @@
               />
             </template>
             <template v-else>
-              <h2 v-if="el.element_type === 'title'">{{ el.latest_version?.content || "" }}</h2>
-              <span v-else>{{ el.latest_version?.content || "" }}</span>
+              <h2 v-if="el.element_type === 'title'">{{ el.content || "" }}</h2>
+              <span v-else>{{ el.content || "" }}</span>
             </template>
           </div>
         </div>
@@ -218,7 +218,7 @@ function startEdit(event: MouseEvent, el: ElementItem) {
   if (el.element_type === "image") return;
 
   event.stopPropagation();
-  const content = el.latest_version?.content ?? "";
+  const content = el.content ?? "";
   editState.value = { elementId: el.id, content, originalContent: content };
 
   nextTick(() => {

@@ -43,139 +43,228 @@ defmodule Slidething.LLM.Provider.Mock do
         is_binary(msg.content) and String.contains?(msg.content, "Existing book:")
       end)
 
+    has_target_page? =
+      Enum.any?(messages, fn msg ->
+        is_binary(msg.content) and String.contains?(msg.content, "Target page:")
+      end)
+
     plan =
-      if existing_book? do
-        %{
-          "context" => "Edit existing page content and layout",
-          "phases" => [
-            %{
-              "name" => "generate_content",
-              "step_type" => "agent",
-              "agent_type" => "content",
-              "scope" => "per_page",
-              "depends_on" => [],
-              "condition" => nil,
-              "max_retries" => 2,
-              "context" => nil
-            },
-            %{
-              "name" => "generate_media",
-              "step_type" => "agent",
-              "agent_type" => "media",
-              "scope" => "per_page",
-              "depends_on" => ["generate_content"],
-              "condition" => nil,
-              "max_retries" => 2,
-              "context" => nil
-            },
-            %{
-              "name" => "generate_layout",
-              "step_type" => "agent",
-              "agent_type" => "layout",
-              "scope" => "per_page",
-              "depends_on" => ["generate_media"],
-              "condition" => nil,
-              "max_retries" => 2,
-              "context" => nil
-            },
-            %{
-              "name" => "validate_layout",
-              "step_type" => "validator",
-              "agent_type" => "validator",
-              "scope" => "per_page",
-              "depends_on" => ["generate_layout"],
-              "condition" => nil,
-              "max_retries" => 1,
-              "context" => nil
-            },
-            %{
-              "name" => "repair_layout",
-              "step_type" => "agent",
-              "agent_type" => "layout",
-              "scope" => "per_page",
-              "depends_on" => ["validate_layout"],
-              "condition" => "has_layout_issues",
-              "max_retries" => 2,
-              "context" => nil
-            }
-          ]
-        }
-      else
-        %{
-          "context" => "Create new book with semantic phases",
-          "phases" => [
-            %{
-              "name" => "decide_theme",
-              "step_type" => "planner",
-              "agent_type" => "planner",
-              "scope" => "book",
-              "depends_on" => [],
-              "condition" => nil,
-              "max_retries" => 1,
-              "context" => nil
-            },
-            %{
-              "name" => "assign_outline",
-              "step_type" => "planner",
-              "agent_type" => "planner",
-              "scope" => "book",
-              "depends_on" => ["decide_theme"],
-              "condition" => nil,
-              "max_retries" => 1,
-              "context" => nil
-            },
-            %{
-              "name" => "generate_content",
-              "step_type" => "agent",
-              "agent_type" => "content",
-              "scope" => "per_page",
-              "depends_on" => ["assign_outline"],
-              "condition" => nil,
-              "max_retries" => 2,
-              "context" => nil
-            },
-            %{
-              "name" => "generate_media",
-              "step_type" => "agent",
-              "agent_type" => "media",
-              "scope" => "per_page",
-              "depends_on" => ["generate_content"],
-              "condition" => nil,
-              "max_retries" => 2,
-              "context" => nil
-            },
-            %{
-              "name" => "generate_layout",
-              "step_type" => "agent",
-              "agent_type" => "layout",
-              "scope" => "per_page",
-              "depends_on" => ["generate_media"],
-              "condition" => nil,
-              "max_retries" => 2,
-              "context" => nil
-            },
-            %{
-              "name" => "review_book",
-              "step_type" => "coordinator",
-              "agent_type" => "coordinator",
-              "scope" => "book",
-              "depends_on" => ["generate_layout"],
-              "condition" => nil,
-              "max_retries" => 1,
-              "context" => nil
-            },
-            %{
-              "name" => "validate_book",
-              "step_type" => "validator",
-              "agent_type" => "validator",
-              "scope" => "per_page",
-              "depends_on" => ["review_book"],
-              "condition" => nil,
-              "max_retries" => 1,
-              "context" => nil
-            }
-          ]
-        }
+      cond do
+        existing_book? and has_target_page? ->
+          target_page_id = extract_target_page_id(messages)
+          image_elem_id = extract_image_element_id(messages)
+
+          media_config =
+            if image_elem_id do
+              %{
+                "op" => "update",
+                "page_id" => target_page_id,
+                "element_id" => image_elem_id,
+                "aspect_ratio" => "1:1"
+              }
+            else
+              %{"op" => "create", "page_id" => target_page_id, "aspect_ratio" => "1:1"}
+            end
+
+          %{
+            "context" => "Edit specific page content and image",
+            "phases" => [
+              %{
+                "name" => "generate_content",
+                "step_type" => "agent",
+                "agent_type" => "content",
+                "scope" => "book",
+                "config" => %{
+                  "op" => "create",
+                  "element_type" => "text",
+                  "page_id" => target_page_id
+                },
+                "depends_on" => [],
+                "condition" => nil,
+                "max_retries" => 2,
+                "context" => nil
+              },
+              %{
+                "name" => "generate_media",
+                "step_type" => "agent",
+                "agent_type" => "media",
+                "scope" => "book",
+                "config" => media_config,
+                "depends_on" => ["generate_content"],
+                "condition" => nil,
+                "max_retries" => 2,
+                "context" => nil
+              },
+              %{
+                "name" => "generate_layout",
+                "step_type" => "agent",
+                "agent_type" => "layout",
+                "scope" => "per_page",
+                "depends_on" => ["generate_media"],
+                "condition" => nil,
+                "max_retries" => 2,
+                "context" => nil
+              },
+              %{
+                "name" => "validate_layout",
+                "step_type" => "validator",
+                "agent_type" => "validator",
+                "scope" => "per_page",
+                "depends_on" => ["generate_layout"],
+                "condition" => nil,
+                "max_retries" => 1,
+                "context" => nil
+              },
+              %{
+                "name" => "repair_layout",
+                "step_type" => "agent",
+                "agent_type" => "layout",
+                "scope" => "per_page",
+                "depends_on" => ["validate_layout"],
+                "condition" => "has_layout_issues",
+                "max_retries" => 2,
+                "context" => nil
+              }
+            ]
+          }
+
+        existing_book? ->
+          %{
+            "context" => "Edit existing book — add a new page",
+            "phases" => [
+              %{
+                "name" => "generate_content",
+                "step_type" => "agent",
+                "agent_type" => "content",
+                "scope" => "book",
+                "config" => %{"op" => "create", "element_type" => "text", "page_index" => 0},
+                "depends_on" => [],
+                "condition" => nil,
+                "max_retries" => 2,
+                "context" => nil
+              },
+              %{
+                "name" => "generate_media",
+                "step_type" => "agent",
+                "agent_type" => "media",
+                "scope" => "book",
+                "config" => %{"op" => "create", "page_index" => 0, "aspect_ratio" => "1:1"},
+                "depends_on" => ["generate_content"],
+                "condition" => nil,
+                "max_retries" => 2,
+                "context" => nil
+              },
+              %{
+                "name" => "generate_layout",
+                "step_type" => "agent",
+                "agent_type" => "layout",
+                "scope" => "per_page",
+                "depends_on" => ["generate_media"],
+                "condition" => nil,
+                "max_retries" => 2,
+                "context" => nil
+              },
+              %{
+                "name" => "validate_layout",
+                "step_type" => "validator",
+                "agent_type" => "validator",
+                "scope" => "per_page",
+                "depends_on" => ["generate_layout"],
+                "condition" => nil,
+                "max_retries" => 1,
+                "context" => nil
+              },
+              %{
+                "name" => "repair_layout",
+                "step_type" => "agent",
+                "agent_type" => "layout",
+                "scope" => "per_page",
+                "depends_on" => ["validate_layout"],
+                "condition" => "has_layout_issues",
+                "max_retries" => 2,
+                "context" => nil
+              }
+            ]
+          }
+
+        true ->
+          %{
+            "context" => %{"book_title" => "Mock Book", "theme" => "adventure"},
+            "phases" => [
+              %{
+                "name" => "decide_theme",
+                "step_type" => "planner",
+                "agent_type" => "planner",
+                "scope" => "book",
+                "depends_on" => [],
+                "condition" => nil,
+                "max_retries" => 1,
+                "context" => nil
+              },
+              %{
+                "name" => "assign_outline",
+                "step_type" => "planner",
+                "agent_type" => "planner",
+                "scope" => "book",
+                "depends_on" => ["decide_theme"],
+                "condition" => nil,
+                "max_retries" => 1,
+                "context" => nil
+              },
+              %{
+                "name" => "generate_content",
+                "step_type" => "agent",
+                "agent_type" => "content",
+                "scope" => "book",
+                "config" => %{"op" => "create", "element_type" => "text", "page_index" => 0},
+                "depends_on" => ["assign_outline"],
+                "condition" => nil,
+                "max_retries" => 2,
+                "context" => nil
+              },
+              %{
+                "name" => "generate_media",
+                "step_type" => "agent",
+                "agent_type" => "media",
+                "scope" => "book",
+                "config" => %{"op" => "create", "page_index" => 0, "aspect_ratio" => "1:1"},
+                "depends_on" => ["generate_content"],
+                "condition" => nil,
+                "max_retries" => 2,
+                "context" => nil
+              },
+              %{
+                "name" => "generate_layout",
+                "step_type" => "agent",
+                "agent_type" => "layout",
+                "scope" => "per_page",
+                "depends_on" => ["generate_media"],
+                "condition" => nil,
+                "max_retries" => 2,
+                "context" => nil
+              },
+              %{
+                "name" => "review_book",
+                "step_type" => "coordinator",
+                "agent_type" => "coordinator",
+                "scope" => "book",
+                "depends_on" => ["generate_layout"],
+                "condition" => nil,
+                "max_retries" => 1,
+                "context" => nil
+              },
+              %{
+                "name" => "validate_book",
+                "step_type" => "validator",
+                "agent_type" => "validator",
+                "scope" => "per_page",
+                "depends_on" => ["review_book"],
+                "condition" => nil,
+                "max_retries" => 1,
+                "context" => nil
+              }
+            ]
+          }
       end
 
     {:tool_requests, [%ToolCall{call_id: "emit_0", tool: :submit_plan, args: %{"plan" => plan}}]}
@@ -194,34 +283,8 @@ defmodule Slidething.LLM.Provider.Mock do
     {:final_response, Jason.encode!(result)}
   end
 
-  def complete_json(%AgentSpec{name: :content}, messages) do
-    iteration = count_iterations(messages)
-    page_scope = extract_page_scope(messages)
-
-    page_id =
-      case page_scope do
-        {:page, pid} -> pid
-        _ -> "page-unknown"
-      end
-
-    case iteration do
-      0 ->
-        tool_call("content_call_0", :create_element, %{
-          "page_id" => page_id,
-          "element_type" => "title",
-          "content" => "Mock title for #{page_id}"
-        })
-
-      1 ->
-        tool_call("content_call_1", :create_element, %{
-          "page_id" => page_id,
-          "element_type" => "text",
-          "content" => "Mock body text for #{page_id}"
-        })
-
-      _ ->
-        {:final_response, "Content creation complete for #{page_id}"}
-    end
+  def complete_json(%AgentSpec{name: :content}, _messages) do
+    {:final_response, "Mock body text for the page."}
   end
 
   def complete_json(%AgentSpec{name: :layout}, messages) do
@@ -278,10 +341,6 @@ defmodule Slidething.LLM.Provider.Mock do
     {:final_response, "Mock response"}
   end
 
-  defp tool_call(call_id, tool, args) do
-    {:tool_requests, [%ToolCall{call_id: call_id, tool: tool, args: args}]}
-  end
-
   defp count_iterations(messages) do
     Enum.count(messages, fn
       %Message{role: :tool} -> true
@@ -308,6 +367,38 @@ defmodule Slidething.LLM.Provider.Mock do
       {:page, pid} -> pid
       _ -> nil
     end
+  end
+
+  defp extract_target_page_id(messages) do
+    Enum.find_value(messages, fn
+      %Message{role: :user, content: content} when is_binary(content) ->
+        case Regex.run(~r/Target page: (page_[\w-]+)/, content) do
+          [_, pid] -> pid
+          _ -> nil
+        end
+
+      %Message{role: :system, content: content} when is_binary(content) ->
+        case Regex.run(~r/Target page: (page_[\w-]+)/, content) do
+          [_, pid] -> pid
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp extract_image_element_id(messages) do
+    Enum.find_value(messages, fn
+      %Message{role: :user, content: content} when is_binary(content) ->
+        case Regex.run(~r/\[image\] (elem_[\w-]+)/, content) do
+          [_, eid] -> eid
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end)
   end
 
   defp extract_page_elements(messages) do
