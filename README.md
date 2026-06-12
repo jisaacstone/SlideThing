@@ -1,6 +1,6 @@
 # Slidething
 
-AI-powered children's book creation platform (Elixir/Phoenix MVP).
+AI-powered slide-deck generation platform (Elixir/Phoenix MVP).
 
 ## Setup
 
@@ -28,7 +28,7 @@ The server starts at `http://localhost:4000`. Database tables are created automa
 ## Quick start (mock, no API keys)
 
 ```bash
-mix slidething.generate "Create a 5-page children's book about a penguin who wants to fly"
+mix slidething.generate "Create a 10-slide deck about AI-powered document generation"
 ```
 
 Streams agent progress in real time with icons (phases, tool calls, LLM iterations).
@@ -52,7 +52,7 @@ SLIDETHING_AGENT_CONFIG=agents-openrouter-free.json mix phx.server
 
 # One-shot generation (free tier)
 SLIDETHING_AGENT_CONFIG=agents-openrouter-free.json \
-  mix slidething.generate "Create a children's book about a penguin"
+  mix slidething.generate "Create a 10-slide pitch deck for a SaaS product"
 ```
 
 ## Fast OpenRouter scripts
@@ -60,7 +60,7 @@ SLIDETHING_AGENT_CONFIG=agents-openrouter-free.json \
 ```bash
 # Requires OPENROUTER_API_KEY in .env
 bin/run-openrouter.sh                           # Dev server → agents-openrouter.json
-bin/generate-openrouter.sh "Create a book..."   # One-shot, agents-openrouter.json
+bin/generate-openrouter.sh "Create a deck..."   # One-shot, agents-openrouter.json
 ```
 
 ## Switching providers at runtime (IEx)
@@ -78,7 +78,7 @@ for agent <- [:planner, :content, :research, :layout, :media] do
 end
 
 # Run a generation
-{:ok, run_id} = Slidething.Agent.API.start_run("Create a book...")
+{:ok, run_id} = Slidething.Agent.API.start_run("Create a deck...")
 
 # Back to file defaults
 Slidething.Agent.Config.reset()
@@ -95,7 +95,7 @@ mix phx.server    # → http://localhost:4000
 # Create a run
 curl -X POST http://localhost:4000/api/runs \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "Create a children's book about a fox"}'
+  -d '{"prompt": "Create a 10-slide pitch deck about a new SaaS product"}'
 
 # Check status
 curl http://localhost:4000/api/runs/run_123456
@@ -111,7 +111,7 @@ channel.join()
 channel.on("run_event", data => console.log(data))
 channel.on("agent_event", data => console.log(data))
 
-channel.push("prompt", {prompt: "Create a book..."})
+channel.push("prompt", {prompt: "Create a deck..."})
   .receive("ok", resp => console.log("run_id:", resp.run_id))
 ```
 

@@ -821,6 +821,9 @@ defmodule Slidething.Agent.Orchestrator do
     with {:ok, %{book_id: book_id}} <- Slidething.Book.create("Untitled", %{}),
          _ <- Slidething.Book.add_format(book_id, @default_format_id) do
       {:ok, book_id}
+    else
+      {:error, reason} -> {:error, reason}
+      error -> {:error, error}
     end
   end
 

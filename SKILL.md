@@ -1,11 +1,11 @@
 ---
 name: slidething
-description: Use ONLY when working with children's book creation projects using the Slidething platform. Use to create books, generate pages, manage content/layout, and submit AI prompts via the HTTP API. Covers all Slidething REST endpoints and WebSocket channels.
+description: Use ONLY when working with slide-deck generation projects using the Slidething platform. Use to create decks, generate slides, manage content/layout, and submit AI prompts via the HTTP API. Covers all Slidething REST endpoints and WebSocket channels.
 ---
 
 # Slidething Platform API
 
-Slidething is an AI-powered children's book creation platform. It exposes a REST API and WebSocket channels for creating books, managing pages, generating content via LLM agents, and inspecting results.
+Slidething is an AI-powered slide-deck generation platform. It exposes a REST API and WebSocket channels for creating decks, managing slides, generating content via LLM agents, and inspecting results.
 
 Base URL: `http://localhost:4000`
 WebSocket: `ws://localhost:4000/socket`
@@ -87,7 +87,7 @@ ch.on("agent_event", (data) => console.log(data))
 ch.join()
 
 // Start a run by sending a prompt (alternative to POST /api/runs)
-ch.push("prompt", {prompt: "Create a 5-page book about a penguin", book_id: "book_xyz"})
+ch.push("prompt", {prompt: "Create a 10-slide pitch deck about our product", book_id: "book_xyz"})
 ```
 
 Outbound events (received):
@@ -164,7 +164,7 @@ curl -X POST http://localhost:4000/api/books \
 curl -X POST http://localhost:4000/api/runs \
   -H "Content-Type: application/json" \
   -d '{
-    "prompt": "Create a 5-page childrens book about a penguin",
+    "prompt": "Create a 10-slide pitch deck about our product",
     "book_id": "book_abc123"
   }'
 ```
