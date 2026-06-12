@@ -46,7 +46,10 @@
       </div>
       <span class="outline-page-count">{{ pages.length }} pages</span>
 
-      <button class="btn-ghost new-page-btn" @click="showAddPageDialog = true">+ New Page</button>
+      <div class="outline-actions">
+        <button class="btn-ghost new-page-btn" @click="showAddPageDialog = true">+ New Page</button>
+        <button class="btn-ghost download-btn" @click="$emit('download-pdf')" title="Download as PDF">⬇ PDF</button>
+      </div>
 
       <!-- Add Page Dialog -->
       <div v-if="showAddPageDialog" class="dialog-overlay" @click.self="showAddPageDialog = false">
@@ -109,6 +112,7 @@ const emit = defineEmits<{
   "delete-page": [pageId: string];
   "delete-book": [];
   "book-prompt": [];
+  "download-pdf": [];
 }>();
 
 const newBookTitle = ref("");
@@ -407,6 +411,12 @@ watch(
   color: #ff6666;
 }
 
+.outline-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+
 .new-page-btn {
   background: none;
   border: 1px dashed rgba(255, 255, 255, 0.2);
@@ -415,12 +425,28 @@ watch(
   padding: 6px 10px;
   border-radius: 6px;
   cursor: pointer;
-  width: 100%;
-  margin-top: 12px;
+  flex: 1;
   transition: border-color 0.15s, color 0.15s;
 }
 
 .new-page-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.download-btn {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--sidebar-text-muted);
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.download-btn:hover {
   border-color: var(--primary);
   color: var(--primary);
 }

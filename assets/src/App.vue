@@ -15,6 +15,7 @@
       @delete-page="handleDeletePage"
       @delete-book="handleDeleteBook"
       @book-prompt="openBookPrompt"
+      @download-pdf="downloadPDF"
     />
 
     <PageView
@@ -45,6 +46,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from "vue";
+import { marked } from "marked";
 import type { Book, Page, PromptEntry, RunEvent } from "./api";
 import {
   channel,
@@ -244,6 +246,121 @@ async function handleDeleteBook() {
   if (!currentBookId.value || !confirm("Delete this book and all its pages?")) return;
   await deleteBook(currentBookId.value);
   await backToBooks();
+}
+
+function downloadPDF() {
+  if (!pages.value.length) return;
+
+  const firstFormat = pages.value.find((p) => p.layouts?.[0]?.format)?.layouts[0].format;
+
+  // CSS @page size doesn't support px — convert to mm using DPI
+  function toCssDim(value: number, unit: string, dpi: number): string {
+    if (unit === "px") return `${(value / dpi) * 25.4}mm`;
+    return `${value}${unit}`;
+  }
+
+  const dpi = firstFormat?.dpi ?? 96;
+  const rawUnit = firstFormat?.unit ?? "px";
+  const rawW = firstFormat?.width ?? 1280;
+  const rawH = firstFormat?.height ?? 720;
+  const cssW = toCssDim(rawW, rawUnit, dpi);
+  const cssH = toCssDim(rawH, rawUnit, dpi);
+
+  // For font sizing, derive a reference px width (used for em scaling)
+  const refPx = rawUnit === "px" ? rawW : (rawW * dpi) / (rawUnit === "in" ? 1 : rawUnit === "cm" ? 2.54 : rawUnit === "mm" ? 25.4 : 1);
+  const titleEm = `${(refPx * 0.04).toFixed(1)}px`;
+  const bodyEm = `${(refPx * 0.022).toFixed(1)}px`;
+  const captionEm = `${(refPx * 0.017).toFixed(1)}px`;
+
+  const slideCSS = `
+    @page { size: ${cssW} ${cssH}; margin: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: ${cssW}; height: ${cssH}; background: white; }
+    .slide {
+      width: ${cssW};
+      height: ${cssH};
+      position: relative;
+      overflow: hidden;
+      background: white;
+      page-break-after: always;
+      break-after: page;
+    }
+    .slide:last-child { page-break-after: avoid; break-after: avoid; }
+    .slide-el {
+      position: absolute;
+      overflow: hidden;
+      font-family: sans-serif;
+      padding: 4px;
+    }
+    .slide-el-title { font-size: ${titleEm}; font-weight: 700; line-height: 1.3; }
+    .slide-el-text { font-size: ${bodyEm}; line-height: 1.7; }
+    .slide-el-caption { font-size: ${captionEm}; color: #555; }
+    .slide-el img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .slide-el h1, .slide-el h2, .slide-el h3 { margin: 0 0 0.2em; font-weight: 700; line-height: 1.3; }
+    .slide-el p { margin: 0 0 0.4em; }
+    .slide-el p:last-child { margin-bottom: 0; }
+    .slide-el ul, .slide-el ol { margin: 0 0 0.4em; padding-left: 1.4em; }
+    .slide-el li { margin-bottom: 0.1em; }
+    .slide-el strong { font-weight: 600; }
+    .slide-el em { font-style: italic; }
+  `;
+
+  const slidesHTML = pages.value.map((page) => {
+    const layout = page.layouts?.[0];
+    const bboxMap: Record<string, { x: number; y: number; width: number; height: number }> = {};
+    for (const el of layout?.element_layouts ?? []) {
+      bboxMap[el.element_id] = { x: el.x, y: el.y, width: el.width, height: el.height };
+    }
+
+    const hasLayout = Object.keys(bboxMap).length > 0;
+
+    const elementsHTML = page.elements.map((el) => {
+      const bb = bboxMap[el.id];
+
+      let inner = "";
+      if (el.element_type === "image" && el.asset_path) {
+        inner = `<img src="/api/assets/${el.asset_path}" alt="" />`;
+      } else {
+        inner = el.content ? (marked.parse(el.content) as string) : "";
+      }
+
+      if (bb) {
+        const style = [
+          `left:${bb.x * 100}%`,
+          `top:${bb.y * 100}%`,
+          `width:${bb.width * 100}%`,
+          `height:${bb.height * 100}%`,
+        ].join(";");
+        return `<div class="slide-el slide-el-${el.element_type}" style="${style}">${inner}</div>`;
+      } else if (!hasLayout) {
+        return `<div class="slide-el-flow slide-el-${el.element_type}">${inner}</div>`;
+      }
+      return "";
+    }).join("");
+
+    return `<div class="slide">${elementsHTML}</div>`;
+  }).join("\n");
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${currentBook.value?.title ?? "Slides"}</title>
+  <style>${slideCSS}</style>
+</head>
+<body>
+${slidesHTML}
+<script>
+  window.addEventListener("load", function() { window.print(); });
+<\/script>
+</body>
+</html>`;
+
+  const win = window.open("", "_blank");
+  if (win) {
+    win.document.write(html);
+    win.document.close();
+  }
 }
 
 async function loadPrompts() {

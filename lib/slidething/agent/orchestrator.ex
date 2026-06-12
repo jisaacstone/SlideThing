@@ -312,51 +312,47 @@ defmodule Slidething.Agent.Orchestrator do
       {:ok, plan} ->
         Logger.debug("[Planner] Phases: #{inspect(Enum.map(plan.phases, & &1.name))}")
 
-        case ensure_book(state) do
-          {:ok, book_id} ->
-            context_map =
-              cond do
-                is_map(plan.context) ->
-                  plan.context
+        {:ok, book_id} = ensure_book(state)
 
-                is_binary(plan.context) ->
-                  case Jason.decode(plan.context) do
-                    {:ok, map} when is_map(map) -> map
-                    _ -> %{}
-                  end
+        context_map =
+          cond do
+            is_map(plan.context) ->
+              plan.context
 
-                true ->
-                  %{}
+            is_binary(plan.context) ->
+              case Jason.decode(plan.context) do
+                {:ok, map} when is_map(map) -> map
+                _ -> %{}
               end
 
-            case context_map["book_title"] do
-              title when is_binary(title) and title != "" ->
-                Slidething.Book.update_title(book_id, title)
+            true ->
+              %{}
+          end
 
-              _ ->
-                :ok
-            end
+        case context_map["book_title"] do
+          title when is_binary(title) and title != "" ->
+            Slidething.Book.update_title(book_id, title)
 
-            new_state = %{
-              state
-              | generated_plan: plan,
-                book_id: book_id,
-                page_index_map: %{},
-                status: :executing,
-                completed_phases: MapSet.new(),
-                running_phases: MapSet.new()
-            }
-
-            broadcast_event(new_state, :planning_complete, %{
-              book_id: book_id,
-              phase_count: length(plan.phases)
-            })
-
-            schedule_next_phases(new_state)
-
-          {:error, reason} ->
-            fail_run(state, "Failed to create book: #{inspect(reason)}")
+          _ ->
+            :ok
         end
+
+        new_state = %{
+          state
+          | generated_plan: plan,
+            book_id: book_id,
+            page_index_map: %{},
+            status: :executing,
+            completed_phases: MapSet.new(),
+            running_phases: MapSet.new()
+        }
+
+        broadcast_event(new_state, :planning_complete, %{
+          book_id: book_id,
+          phase_count: length(plan.phases)
+        })
+
+        schedule_next_phases(new_state)
 
       {:error, reason} ->
         fail_run(state, "Invalid plan from planner: #{inspect(reason)}")
@@ -821,9 +817,6 @@ defmodule Slidething.Agent.Orchestrator do
     with {:ok, %{book_id: book_id}} <- Slidething.Book.create("Untitled", %{}),
          _ <- Slidething.Book.add_format(book_id, @default_format_id) do
       {:ok, book_id}
-    else
-      {:error, reason} -> {:error, reason}
-      error -> {:error, error}
     end
   end
 

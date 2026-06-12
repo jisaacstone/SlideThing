@@ -9,7 +9,8 @@ defmodule Slidething.Validator.Layout do
         []
 
       {:ok, %{element_layouts: layouts, format: format}} ->
-        check_zero_area(layouts) ++
+        check_missing_layouts(layouts, page_id) ++
+          check_zero_area(layouts) ++
           check_overflow(layouts) ++
           check_intersections(layouts) ++
           check_safe_margin(layouts, format) ++
@@ -18,6 +19,23 @@ defmodule Slidething.Validator.Layout do
   end
 
   # ── Individual checks ───────────────────────────────────────────────────────
+
+  defp check_missing_layouts(layouts, page_id) do
+    laid_out = MapSet.new(layouts, & &1["element_id"])
+
+    for el <- Slidething.Element.list(page_id),
+        not MapSet.member?(laid_out, el.id) do
+      %ValidationIssue{
+        severity: :error,
+        source: :layout,
+        target_id: el.id,
+        rule: "missing_layout",
+        message: "Element has no layout entry and will not render",
+        measured_value: %{element_type: el.element_type},
+        expected_value: "every element must have a layout entry"
+      }
+    end
+  end
 
   defp check_zero_area(layouts) do
     for el <- layouts,
